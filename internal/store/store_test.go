@@ -369,6 +369,40 @@ func TestRelatedNotes(t *testing.T) {
 	}
 }
 
+func TestRelatedNotesAvoidsCycleAmplification(t *testing.T) {
+	s := setupTestStore(t)
+	a, _ := s.CreateNote("A", nil, nil, "")
+	b, _ := s.CreateNote("B", nil, nil, "")
+	c, _ := s.CreateNote("C", nil, nil, "")
+
+	if err := s.LinkNotes(a.ID, b.ID, 0.9, "a->b"); err != nil {
+		t.Fatalf("link a->b: %v", err)
+	}
+	if err := s.LinkNotes(b.ID, a.ID, 0.9, "b->a"); err != nil {
+		t.Fatalf("link b->a: %v", err)
+	}
+	if err := s.LinkNotes(b.ID, c.ID, 0.5, "b->c"); err != nil {
+		t.Fatalf("link b->c: %v", err)
+	}
+
+	related, err := s.RelatedNotes(a.ID, 3, 10)
+	if err != nil {
+		t.Fatalf("related notes depth3: %v", err)
+	}
+
+	scoreByID := map[int64]float64{}
+	for _, rn := range related {
+		scoreByID[rn.Note.ID] = rn.Score
+	}
+
+	if !almostEqual(scoreByID[b.ID], 0.9) {
+		t.Fatalf("expected B score to remain direct-only 0.9, got %f", scoreByID[b.ID])
+	}
+	if scoreByID[c.ID] <= 0 {
+		t.Fatal("expected C to appear through B with positive score")
+	}
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	s := setupTestStore(t)
 

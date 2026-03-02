@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"sort"
 	"time"
@@ -46,10 +47,14 @@ func (s *Store) RelatedNotes(seedNoteID int64, depth, topK int) ([]model.Related
 	}
 
 	if _, err := s.GetNote(seedNoteID); err != nil {
-		return nil, fmt.Errorf("seed note %d not found", seedNoteID)
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("seed note %d not found", seedNoteID)
+		}
+		return nil, fmt.Errorf("get seed note %d: %w", seedNoteID, err)
 	}
 
 	frontier := map[int64]float64{seedNoteID: 1.0}
+	visited := map[int64]bool{seedNoteID: true}
 	scores := make(map[int64]float64)
 
 	for d := 1; d <= depth; d++ {
@@ -76,6 +81,9 @@ func (s *Store) RelatedNotes(seedNoteID int64, depth, topK int) ([]model.Related
 				if propagated <= 0 {
 					continue
 				}
+				if visited[toNoteID] {
+					continue
+				}
 				if current, ok := nextFrontier[toNoteID]; !ok || propagated > current {
 					nextFrontier[toNoteID] = propagated
 				}
@@ -92,6 +100,9 @@ func (s *Store) RelatedNotes(seedNoteID int64, depth, topK int) ([]model.Related
 
 		if len(nextFrontier) == 0 {
 			break
+		}
+		for noteID := range nextFrontier {
+			visited[noteID] = true
 		}
 		frontier = nextFrontier
 	}
