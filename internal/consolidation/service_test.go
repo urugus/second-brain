@@ -614,6 +614,74 @@ func TestApplyAppendsRelatedSection(t *testing.T) {
 	}
 }
 
+func TestApplyRelatedSectionUsesContentMatchedNotes(t *testing.T) {
+	s, k := setupTest(t)
+
+	k.Write("existing/alpha.md", "# Related Alpha\n")
+	k.Write("existing/beta.md", "# Related Beta\n")
+	anchorAlpha, _ := s.CreateNote("anchor alpha", nil, nil, "manual")
+	anchorBeta, _ := s.CreateNote("anchor beta", nil, nil, "manual")
+	s.MapKBNotes("existing/alpha.md", []int64{anchorAlpha.ID})
+	s.MapKBNotes("existing/beta.md", []int64{anchorBeta.ID})
+
+	sess, _ := s.CreateSession("Selective Mapping", "")
+	noteA, _ := s.CreateNote("alpha cache invalidation details", &sess.ID, []string{"alpha"}, "manual")
+	noteB, _ := s.CreateNote("beta queue backpressure analysis", &sess.ID, []string{"beta"}, "manual")
+	s.EndSession(sess.ID, "done")
+
+	s.LinkNotes(noteA.ID, anchorAlpha.ID, 0.8, "alpha relation")
+	s.LinkNotes(noteB.ID, anchorBeta.ID, 0.8, "beta relation")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Selective related mapping",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "new/alpha-topic.md",
+					Content: "# Alpha Topic\nalpha cache invalidation details\n",
+					Reason:  "alpha",
+				},
+				{
+					Path:    "new/beta-topic.md",
+					Content: "# Beta Topic\nbeta queue backpressure analysis\n",
+					Reason:  "beta",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if err := svc.Apply(context.Background(), proposed, []int{0, 1}, nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	alphaContent, err := k.Read("new/alpha-topic.md")
+	if err != nil {
+		t.Fatalf("read alpha topic: %v", err)
+	}
+	betaContent, err := k.Read("new/beta-topic.md")
+	if err != nil {
+		t.Fatalf("read beta topic: %v", err)
+	}
+
+	if !strings.Contains(alphaContent, "Related Alpha") {
+		t.Fatalf("alpha topic should include Related Alpha link, got:\n%s", alphaContent)
+	}
+	if strings.Contains(alphaContent, "Related Beta") {
+		t.Fatalf("alpha topic should not include Related Beta link, got:\n%s", alphaContent)
+	}
+	if !strings.Contains(betaContent, "Related Beta") {
+		t.Fatalf("beta topic should include Related Beta link, got:\n%s", betaContent)
+	}
+	if strings.Contains(betaContent, "Related Alpha") {
+		t.Fatalf("beta topic should not include Related Alpha link, got:\n%s", betaContent)
+	}
+}
+
 func TestApplyStripsOldRelatedSection(t *testing.T) {
 	s, k := setupTest(t)
 
