@@ -102,8 +102,8 @@ func TestMigrateFromV3ToLatestBackfillsDefaults(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected schema version 6, got %d", version)
+	if version != 7 {
+		t.Fatalf("expected schema version 7, got %d", version)
 	}
 
 	var strength, decayRate, salience float64

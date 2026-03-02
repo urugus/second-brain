@@ -192,14 +192,39 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	}
 	dedupedKBUpdates := dedupeKBUpdatesByPath(result.KBUpdates)
 
+	// Gather note IDs for KB mapping
+	sleepNoteIDs := make([]int64, len(replayPlan.replayNotes))
+	for i, n := range replayPlan.replayNotes {
+		sleepNoteIDs[i] = n.ID
+	}
+
 	var appliedFiles []string
 	var writeErrors []string
 	for _, u := range dedupedKBUpdates {
-		if err := s.kb.Write(u.Path, u.Content); err != nil {
+		content := stripRelatedSection(u.Content)
+		if err := s.kb.Write(u.Path, content); err != nil {
 			writeErrors = append(writeErrors, fmt.Sprintf("%s: %v", u.Path, err))
 			continue
 		}
 		appliedFiles = append(appliedFiles, u.Path)
+
+		// Record note→KB mapping
+		if len(sleepNoteIDs) > 0 {
+			_ = s.store.MapKBNotes(u.Path, sleepNoteIDs)
+		}
+	}
+
+	// Append Related sections (after all mappings are recorded)
+	for _, path := range appliedFiles {
+		section := buildRelatedSection(path, s.store, s.kb)
+		if section == "" {
+			continue
+		}
+		existing, err := s.kb.Read(path)
+		if err != nil {
+			continue
+		}
+		_ = s.kb.Write(path, existing+section)
 	}
 
 	if len(writeErrors) > 0 && len(appliedFiles) == 0 {
@@ -413,16 +438,42 @@ func (s *Service) recordSleepPredictionError(predicted, actual float64) {
 func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedKBIndices []int, approvedTaskIndices []int) error {
 	var appliedFiles []string
 
+	// Gather session note IDs for KB mapping
+	sessionNotes, _ := s.store.ListNotes(store.NoteFilter{SessionID: &changes.SessionID})
+	noteIDs := make([]int64, len(sessionNotes))
+	for i, n := range sessionNotes {
+		noteIDs[i] = n.ID
+	}
+
 	// Write approved KB files
 	for _, idx := range approvedKBIndices {
 		if idx < 0 || idx >= len(changes.KBUpdates) {
 			continue
 		}
 		u := changes.KBUpdates[idx]
-		if err := s.kb.Write(u.Path, u.Content); err != nil {
+		content := stripRelatedSection(u.Content)
+		if err := s.kb.Write(u.Path, content); err != nil {
 			return fmt.Errorf("write KB file %s: %w", u.Path, err)
 		}
 		appliedFiles = append(appliedFiles, u.Path)
+
+		// Record note→KB mapping
+		if len(noteIDs) > 0 {
+			_ = s.store.MapKBNotes(u.Path, noteIDs)
+		}
+	}
+
+	// Append Related sections (after all mappings are recorded)
+	for _, path := range appliedFiles {
+		section := buildRelatedSection(path, s.store, s.kb)
+		if section == "" {
+			continue
+		}
+		existing, err := s.kb.Read(path)
+		if err != nil {
+			continue
+		}
+		_ = s.kb.Write(path, existing+section)
 	}
 
 	// Create approved tasks

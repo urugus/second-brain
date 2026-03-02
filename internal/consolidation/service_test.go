@@ -427,6 +427,95 @@ func TestSleepConsolidate_SleepReplayDisabled(t *testing.T) {
 	}
 }
 
+func TestApplyAppendsRelatedSection(t *testing.T) {
+	s, k := setupTest(t)
+
+	// Pre-create a related KB file with a mapped note
+	k.Write("existing/related.md", "# Existing Related\nSome content.\n")
+	existingNote, _ := s.CreateNote("existing knowledge", nil, nil, "manual")
+	s.MapKBNotes("existing/related.md", []int64{existingNote.ID})
+
+	// Create session with a note linked to the existing note
+	sess, _ := s.CreateSession("Link Test", "test related links")
+	sessionNote, _ := s.CreateNote("new knowledge", &sess.ID, nil, "manual")
+	s.EndSession(sess.ID, "done")
+
+	// Create a memory edge between the session note and the existing note
+	s.LinkNotes(sessionNote.ID, existingNote.ID, 0.8, "conceptual link")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Linked consolidation",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "new/topic.md", Content: "# New Topic\nNew content.\n", Reason: "new topic"},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+
+	err = svc.Apply(context.Background(), proposed, []int{0}, nil)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	content, err := k.Read("new/topic.md")
+	if err != nil {
+		t.Fatalf("read KB: %v", err)
+	}
+
+	// Should contain the Related section with a link to existing/related.md
+	if !strings.Contains(content, "## Related") {
+		t.Fatalf("expected Related section in KB file, got:\n%s", content)
+	}
+	if !strings.Contains(content, "Existing Related") {
+		t.Fatalf("expected link title 'Existing Related' in Related section, got:\n%s", content)
+	}
+	if !strings.Contains(content, "existing/related.md") || !strings.Contains(content, "../") {
+		t.Fatalf("expected relative path to existing/related.md in Related section, got:\n%s", content)
+	}
+}
+
+func TestApplyStripsOldRelatedSection(t *testing.T) {
+	s, k := setupTest(t)
+
+	sess, _ := s.CreateSession("Rewrite Test", "")
+	s.CreateNote("note", &sess.ID, nil, "manual")
+	s.EndSession(sess.ID, "done")
+
+	// Agent returns content that already has a Related section
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Strip test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "strip.md",
+					Content: "# Strip\nContent.\n\n---\n\n## Related\n- [Old](old.md)\n",
+					Reason:  "test",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, _ := svc.Propose(context.Background(), sess.ID)
+	svc.Apply(context.Background(), proposed, []int{0}, nil)
+
+	content, _ := k.Read("strip.md")
+	// Old Related section should be stripped
+	if strings.Contains(content, "old.md") {
+		t.Fatalf("old Related links should be stripped, got:\n%s", content)
+	}
+	// Content body should be preserved
+	if !strings.Contains(content, "# Strip") || !strings.Contains(content, "Content.") {
+		t.Fatalf("main content should be preserved, got:\n%s", content)
+	}
+}
+
 func almostEqual(a, b float64) bool {
 	diff := a - b
 	if diff < 0 {

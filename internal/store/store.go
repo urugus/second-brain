@@ -59,6 +59,7 @@ func (s *Store) migrate() error {
 		migrateV4,
 		migrateV5,
 		migrateV6,
+		migrateV7,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -219,6 +220,25 @@ func migrateV5(tx *sql.Tx) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_memory_edges_from ON memory_edges(from_note_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_memory_edges_to ON memory_edges(to_note_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:40], err)
+		}
+	}
+	return nil
+}
+
+func migrateV7(tx *sql.Tx) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS kb_note_map (
+			kb_path    TEXT NOT NULL,
+			note_id    INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+			created_at TEXT NOT NULL,
+			UNIQUE(kb_path, note_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_kb_note_map_path ON kb_note_map(kb_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_kb_note_map_note ON kb_note_map(note_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := tx.Exec(stmt); err != nil {
