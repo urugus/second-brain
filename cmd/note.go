@@ -199,6 +199,31 @@ var noteRelatedCmd = &cobra.Command{
 	},
 }
 
+var noteLinkCmd = &cobra.Command{
+	Use:   "link <from-id> <to-id>",
+	Short: "Create or reinforce a directed memory edge between notes",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fromID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid from note ID: %s", args[0])
+		}
+		toID, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid to note ID: %s", args[1])
+		}
+
+		weight, _ := cmd.Flags().GetFloat64("weight")
+		evidence, _ := cmd.Flags().GetString("evidence")
+		if err := appStore.LinkNotes(fromID, toID, weight, evidence); err != nil {
+			return err
+		}
+
+		fmt.Printf("Linked note #%d -> #%d (weight=%.3f).\n", fromID, toID, weight)
+		return nil
+	},
+}
+
 func noteFilterForSession(sessionID int64) store.NoteFilter {
 	return store.NoteFilter{SessionID: &sessionID}
 }
@@ -212,7 +237,9 @@ func init() {
 	noteListCmd.Flags().String("tag", "", "Filter by tag")
 	noteRelatedCmd.Flags().Int("depth", 1, "Traversal depth for related notes")
 	noteRelatedCmd.Flags().Int("limit", 10, "Maximum number of related notes")
+	noteLinkCmd.Flags().Float64("weight", 0.5, "Edge weight in (0,1]")
+	noteLinkCmd.Flags().String("evidence", "", "Evidence or reason for this link")
 
-	noteCmd.AddCommand(noteAddCmd, noteListCmd, noteShowCmd, noteRecallCmd, noteRelatedCmd)
+	noteCmd.AddCommand(noteAddCmd, noteListCmd, noteShowCmd, noteRecallCmd, noteRelatedCmd, noteLinkCmd)
 	rootCmd.AddCommand(noteCmd)
 }

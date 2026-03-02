@@ -32,6 +32,13 @@ type relatedNotesInput struct {
 	Limit  int   `json:"limit,omitempty" jsonschema:"Max number of related notes (default: 10)"`
 }
 
+type linkNotesInput struct {
+	FromNoteID int64   `json:"from_note_id" jsonschema:"Source note ID"`
+	ToNoteID   int64   `json:"to_note_id" jsonschema:"Target note ID"`
+	Weight     float64 `json:"weight,omitempty" jsonschema:"Edge weight (default: 0.5)"`
+	Evidence   string  `json:"evidence,omitempty" jsonschema:"Optional evidence for this relation"`
+}
+
 func registerNoteTools(server *gomcp.Server, s *store.Store) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_note",
@@ -119,6 +126,29 @@ func registerNoteTools(server *gomcp.Server, s *store.Store) {
 			return textResult("No related notes found"), nil, nil
 		}
 		r, err := jsonResult(related)
+		return r, nil, err
+	})
+
+	gomcp.AddTool(server, &gomcp.Tool{
+		Name:        "link_notes",
+		Description: "Create or reinforce a directed memory edge between two notes",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input linkNotesInput) (*gomcp.CallToolResult, any, error) {
+		weight := input.Weight
+		if weight == 0 {
+			weight = 0.5
+		}
+		if err := s.LinkNotes(input.FromNoteID, input.ToNoteID, weight, input.Evidence); err != nil {
+			return errResult("failed to link notes: " + err.Error()), nil, nil
+		}
+
+		payload := map[string]any{
+			"status":       "linked",
+			"from_note_id": input.FromNoteID,
+			"to_note_id":   input.ToNoteID,
+			"weight":       weight,
+			"evidence":     input.Evidence,
+		}
+		r, err := jsonResult(payload)
 		return r, nil, err
 	})
 }

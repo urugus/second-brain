@@ -350,6 +350,39 @@ func TestRelatedNotes(t *testing.T) {
 	}
 }
 
+func TestLinkNotes(t *testing.T) {
+	session, s, _ := setup(t)
+	from, _ := s.CreateNote("From note", nil, nil, "")
+	to, _ := s.CreateNote("To note", nil, nil, "")
+
+	result := callTool(t, session, "link_notes", map[string]any{
+		"from_note_id": from.ID,
+		"to_note_id":   to.ID,
+		"weight":       0.7,
+		"evidence":     "shared topic",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+
+	text := getTextContent(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse link response: %v", err)
+	}
+	if resp["status"] != "linked" {
+		t.Fatalf("expected status linked, got %v", resp["status"])
+	}
+
+	related, err := s.RelatedNotes(from.ID, 1, 5)
+	if err != nil {
+		t.Fatalf("related notes query failed: %v", err)
+	}
+	if len(related) == 0 || related[0].Note.ID != to.ID {
+		t.Fatalf("expected linked note %d to appear in related notes, got %+v", to.ID, related)
+	}
+}
+
 func TestKBListEmpty(t *testing.T) {
 	session, _, _ := setup(t)
 	result := callTool(t, session, "kb_list", nil)
@@ -526,8 +559,8 @@ func TestToolsListCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 17 {
-		t.Errorf("expected 17 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 18 {
+		t.Errorf("expected 18 tools, got %d", len(result.Tools))
 		for _, tool := range result.Tools {
 			t.Logf("  - %s", tool.Name)
 		}
