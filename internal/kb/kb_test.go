@@ -142,6 +142,45 @@ func TestWriteNested(t *testing.T) {
 	}
 }
 
+func TestExtractTitle(t *testing.T) {
+	k := testKB(t)
+
+	title, err := k.ExtractTitle("golang-tips.md")
+	if err != nil {
+		t.Fatalf("extract title: %v", err)
+	}
+	if title != "Go Tips" {
+		t.Fatalf("expected 'Go Tips', got %q", title)
+	}
+}
+
+func TestExtractTitleNested(t *testing.T) {
+	k := testKB(t)
+
+	title, err := k.ExtractTitle(filepath.Join("nested", "architecture.md"))
+	if err != nil {
+		t.Fatalf("extract title: %v", err)
+	}
+	if title != "Architecture Notes" {
+		t.Fatalf("expected 'Architecture Notes', got %q", title)
+	}
+}
+
+func TestExtractTitleNoHeading(t *testing.T) {
+	dir := t.TempDir()
+	k := New(dir)
+
+	k.Write("no-heading.md", "Just plain text without heading.\n")
+
+	title, err := k.ExtractTitle("no-heading.md")
+	if err != nil {
+		t.Fatalf("extract title: %v", err)
+	}
+	if title != "no-heading" {
+		t.Fatalf("expected fallback 'no-heading', got %q", title)
+	}
+}
+
 func TestWriteDirectoryTraversal(t *testing.T) {
 	dir := t.TempDir()
 	k := New(dir)

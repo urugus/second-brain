@@ -97,6 +97,25 @@ func (k *KB) Exists(relPath string) bool {
 	return err == nil
 }
 
+func (k *KB) ExtractTitle(relPath string) (string, error) {
+	content, err := k.Read(relPath)
+	if err != nil {
+		return "", err
+	}
+
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "# ")), nil
+		}
+	}
+
+	// Fallback: filename without extension
+	base := filepath.Base(relPath)
+	ext := filepath.Ext(base)
+	return strings.TrimSuffix(base, ext), nil
+}
+
 func (k *KB) Search(query string) ([]SearchResult, error) {
 	query = strings.ToLower(query)
 	var results []SearchResult
