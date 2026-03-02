@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -93,6 +94,23 @@ func getTextContent(t *testing.T, result *gomcp.CallToolResult) string {
 		t.Fatal(err)
 	}
 	return tc.Text
+}
+
+func TestServerInstructions(t *testing.T) {
+	session, _, _ := setup(t)
+	result := session.InitializeResult()
+	if result == nil {
+		t.Fatal("expected non-nil InitializeResult")
+	}
+	if result.Instructions == "" {
+		t.Fatal("expected non-empty server instructions")
+	}
+	// Verify instructions mention key concepts
+	for _, keyword := range []string{"second-brain", "session", "task", "note", "knowledge base", "consolidate"} {
+		if !strings.Contains(result.Instructions, keyword) {
+			t.Errorf("instructions should mention %q", keyword)
+		}
+	}
 }
 
 func TestGetActiveSession_NoSession(t *testing.T) {

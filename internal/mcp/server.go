@@ -32,6 +32,29 @@ func defaultAgentFactory(model string) adapter.Agent {
 	return claudeAdapter.New(opts...)
 }
 
+// serverInstructions describes the server and its capabilities for MCP clients.
+const serverInstructions = `second-brain is a personal knowledge management system that captures work sessions, tasks, notes, and long-term knowledge.
+
+Available tool categories:
+- Session management: start_session, end_session, get_active_session, list_sessions
+- Task tracking: create_task, list_tasks, update_task_status
+- Note taking: create_note, list_notes
+- Knowledge base: kb_list, kb_read, kb_search, kb_write
+- Event tracking: list_events
+- Consolidation: consolidate
+
+Typical workflow:
+1. Start a session with start_session (title and optional goal).
+2. During work, create tasks and notes. They auto-attach to the active session.
+3. End the session with end_session (provide a summary).
+4. Run consolidate to extract knowledge into the KB from the completed session.
+
+Important conventions:
+- Only one session can be active at a time. End or abandon the current session before starting a new one.
+- Tasks and notes auto-attach to the active session when no session_id is provided.
+- The knowledge base stores persistent markdown files organized by topic (e.g. "go/testing.md").
+- Use consolidate in "propose" mode first to preview changes, then "apply" to commit them.`
+
 // New creates a configured MCP server with all second-brain tools registered.
 func New(s *store.Store, k *kb.KB, opts ...Option) *gomcp.Server {
 	cfg := &serverConfig{
@@ -44,7 +67,9 @@ func New(s *store.Store, k *kb.KB, opts ...Option) *gomcp.Server {
 	server := gomcp.NewServer(&gomcp.Implementation{
 		Name:    "second-brain",
 		Version: "0.1.0",
-	}, nil)
+	}, &gomcp.ServerOptions{
+		Instructions: serverInstructions,
+	})
 
 	registerSessionTools(server, s)
 	registerTaskTools(server, s)
