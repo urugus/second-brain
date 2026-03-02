@@ -181,11 +181,19 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	}
 
 	var appliedFiles []string
+	var writeErrors []string
 	for _, u := range result.KBUpdates {
 		if err := s.kb.Write(u.Path, u.Content); err != nil {
+			writeErrors = append(writeErrors, fmt.Sprintf("%s: %v", u.Path, err))
 			continue
 		}
 		appliedFiles = append(appliedFiles, u.Path)
+	}
+
+	if len(writeErrors) > 0 && len(appliedFiles) == 0 {
+		errMsg := fmt.Sprintf("all KB writes failed: %s", strings.Join(writeErrors, "; "))
+		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, "")
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 
 	for _, taskTitle := range result.SuggestedTasks {
