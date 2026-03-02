@@ -156,6 +156,9 @@ func trySleepConsolidate(cmd *cobra.Command, modelFlag string) error {
 	}
 
 	fmt.Printf("\nSleep consolidation triggered (%d notes processed).\n", sleepResult.NotesProcessed)
+	if sleepResult.NotesReplayed > 0 && sleepResult.NotesReplayed != sleepResult.NotesProcessed {
+		fmt.Printf("  Notes replayed after dedupe: %d (merged duplicates: %d)\n", sleepResult.NotesReplayed, sleepResult.DuplicatesMerged)
+	}
 	fmt.Printf("  Summary: %s\n", sleepResult.Summary)
 	if len(sleepResult.KBFilesUpdated) > 0 {
 		fmt.Printf("  KB files updated: %v\n", sleepResult.KBFilesUpdated)

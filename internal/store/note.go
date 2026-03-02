@@ -21,6 +21,7 @@ const (
 	defaultDecayRate = 0.015
 	recallAlpha      = 0.25
 	minStrength      = 0.05
+	sleepReplayAlpha = 0.18
 )
 
 func (s *Store) CreateNote(content string, sessionID *int64, tags []string, source string) (*model.Note, error) {
@@ -141,6 +142,54 @@ func (s *Store) MarkNotesConsolidated(noteIDs []int64) error {
 	_, err := s.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("mark notes consolidated: %w", err)
+	}
+	return nil
+}
+
+// ApplySleepReplayConsolidation updates note strength and consolidated state in one transaction.
+// replayWeightByNoteID maps note ID to replay weight in [0, 1].
+func (s *Store) ApplySleepReplayConsolidation(replayWeightByNoteID map[int64]float64, now time.Time) error {
+	if len(replayWeightByNoteID) == 0 {
+		return nil
+	}
+
+	now = now.UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for noteID, replayWeight := range replayWeightByNoteID {
+		replayWeight = clamp(replayWeight, 0, 1)
+
+		var strength, salience float64
+		err := tx.QueryRow(
+			`SELECT strength, salience FROM notes WHERE id = ?`,
+			noteID,
+		).Scan(&strength, &salience)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("note %d not found", noteID)
+		}
+		if err != nil {
+			return fmt.Errorf("get note %d: %w", noteID, err)
+		}
+
+		delta := sleepReplayAlpha * replayWeight * salience * (1 - strength)
+		newStrength := clamp(strength+delta, 0, 1)
+
+		if _, err := tx.Exec(
+			`UPDATE notes SET strength = ?, consolidated_at = ?, updated_at = ? WHERE id = ?`,
+			newStrength, nowStr, nowStr, noteID,
+		); err != nil {
+			return fmt.Errorf("update consolidated note %d: %w", noteID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sleep consolidation updates: %w", err)
 	}
 	return nil
 }

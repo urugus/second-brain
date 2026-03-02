@@ -288,6 +288,55 @@ func TestDecayMemoriesUsesMostRecentMemoryTimestamp(t *testing.T) {
 	}
 }
 
+func TestApplySleepReplayConsolidation(t *testing.T) {
+	s := setupTestStore(t)
+
+	n1, err := s.CreateNote("replay core", nil, nil, "manual")
+	if err != nil {
+		t.Fatalf("create note 1: %v", err)
+	}
+	n2, err := s.CreateNote("replay merged", nil, nil, "manual")
+	if err != nil {
+		t.Fatalf("create note 2: %v", err)
+	}
+
+	runAt := time.Now().UTC().Add(1 * time.Hour).Truncate(time.Second)
+	if err := s.ApplySleepReplayConsolidation(map[int64]float64{
+		n1.ID: 1.0,
+		n2.ID: 0.35,
+	}, runAt); err != nil {
+		t.Fatalf("apply sleep replay consolidation: %v", err)
+	}
+
+	after1, err := s.GetNote(n1.ID)
+	if err != nil {
+		t.Fatalf("get note 1: %v", err)
+	}
+	after2, err := s.GetNote(n2.ID)
+	if err != nil {
+		t.Fatalf("get note 2: %v", err)
+	}
+
+	if after1.ConsolidatedAt == nil || !after1.ConsolidatedAt.Equal(runAt) {
+		t.Fatalf("note 1 consolidated_at mismatch: got %v want %v", after1.ConsolidatedAt, runAt)
+	}
+	if after2.ConsolidatedAt == nil || !after2.ConsolidatedAt.Equal(runAt) {
+		t.Fatalf("note 2 consolidated_at mismatch: got %v want %v", after2.ConsolidatedAt, runAt)
+	}
+	if after1.Strength <= n1.Strength {
+		t.Fatalf("note 1 strength should increase: before=%f after=%f", n1.Strength, after1.Strength)
+	}
+	if after2.Strength <= n2.Strength {
+		t.Fatalf("note 2 strength should increase: before=%f after=%f", n2.Strength, after2.Strength)
+	}
+
+	delta1 := after1.Strength - n1.Strength
+	delta2 := after2.Strength - n2.Strength
+	if delta1 <= delta2 {
+		t.Fatalf("expected canonical replay delta > merged replay delta, got canonical=%f merged=%f", delta1, delta2)
+	}
+}
+
 func TestLinkNotesUpsertReinforcesWeight(t *testing.T) {
 	s := setupTestStore(t)
 	a, _ := s.CreateNote("A", nil, nil, "")
