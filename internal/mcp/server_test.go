@@ -275,6 +275,40 @@ func TestListNotes(t *testing.T) {
 	}
 }
 
+func TestRecallNote(t *testing.T) {
+	session, s, _ := setup(t)
+	note, err := s.CreateNote("Recall this", nil, []string{"memory"}, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := callTool(t, session, "recall_note", map[string]any{
+		"note_id": note.ID,
+		"context": "mcp-test",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+
+	text := getTextContent(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse recall response: %v", err)
+	}
+
+	before := resp["strength_before"].(float64)
+	after := resp["strength_after"].(float64)
+	if after <= before {
+		t.Fatalf("expected strength_after > strength_before, before=%f after=%f", before, after)
+	}
+	if int(resp["recall_count"].(float64)) != 1 {
+		t.Fatalf("expected recall_count=1, got %v", resp["recall_count"])
+	}
+	if resp["last_recalled_at"] == nil || resp["last_recalled_at"] == "" {
+		t.Fatal("expected last_recalled_at to be present")
+	}
+}
+
 func TestKBListEmpty(t *testing.T) {
 	session, _, _ := setup(t)
 	result := callTool(t, session, "kb_list", nil)
@@ -451,8 +485,8 @@ func TestToolsListCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 15 {
-		t.Errorf("expected 15 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 16 {
+		t.Errorf("expected 16 tools, got %d", len(result.Tools))
 		for _, tool := range result.Tools {
 			t.Logf("  - %s", tool.Name)
 		}

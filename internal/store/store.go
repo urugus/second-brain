@@ -56,6 +56,7 @@ func (s *Store) migrate() error {
 		migrateV1,
 		migrateV2,
 		migrateV3,
+		migrateV4,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -182,4 +183,20 @@ func migrateV2(tx *sql.Tx) error {
 		created_at       TEXT NOT NULL
 	)`)
 	return err
+}
+
+func migrateV4(tx *sql.Tx) error {
+	statements := []string{
+		`ALTER TABLE notes ADD COLUMN strength REAL NOT NULL DEFAULT 0.30 CHECK (strength >= 0 AND strength <= 1)`,
+		`ALTER TABLE notes ADD COLUMN decay_rate REAL NOT NULL DEFAULT 0.015 CHECK (decay_rate > 0 AND decay_rate <= 1)`,
+		`ALTER TABLE notes ADD COLUMN salience REAL NOT NULL DEFAULT 0.50 CHECK (salience >= 0 AND salience <= 1)`,
+		`ALTER TABLE notes ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0 CHECK (recall_count >= 0)`,
+		`ALTER TABLE notes ADD COLUMN last_recalled_at TEXT`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:40], err)
+		}
+	}
+	return nil
 }

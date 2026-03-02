@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/urugus/second-brain/internal/store"
@@ -17,6 +19,11 @@ type createNoteInput struct {
 type listNotesInput struct {
 	SessionID *int64 `json:"session_id,omitempty" jsonschema:"Filter by session ID"`
 	Tag       string `json:"tag,omitempty" jsonschema:"Filter by tag"`
+}
+
+type recallNoteInput struct {
+	NoteID  int64  `json:"note_id" jsonschema:"Note ID to recall"`
+	Context string `json:"context,omitempty" jsonschema:"Optional recall context"`
 }
 
 func registerNoteTools(server *gomcp.Server, s *store.Store) {
@@ -54,6 +61,43 @@ func registerNoteTools(server *gomcp.Server, s *store.Store) {
 			return textResult("No notes found"), nil, nil
 		}
 		r, err := jsonResult(notes)
+		return r, nil, err
+	})
+
+	gomcp.AddTool(server, &gomcp.Tool{
+		Name:        "recall_note",
+		Description: "Recall a note to reinforce its memory strength",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input recallNoteInput) (*gomcp.CallToolResult, any, error) {
+		before, err := s.GetNote(input.NoteID)
+		if err != nil {
+			return errResult("failed to get note: " + err.Error()), nil, nil
+		}
+
+		now := time.Now().UTC()
+		if err := s.RecallNote(input.NoteID, now, input.Context); err != nil {
+			return errResult("failed to recall note: " + err.Error()), nil, nil
+		}
+
+		after, err := s.GetNote(input.NoteID)
+		if err != nil {
+			return errResult("failed to fetch recalled note: " + err.Error()), nil, nil
+		}
+
+		payload := map[string]any{
+			"note_id":          input.NoteID,
+			"strength_before":  before.Strength,
+			"strength_after":   after.Strength,
+			"recall_count":     after.RecallCount,
+			"last_recalled_at": nil,
+		}
+		if after.LastRecalledAt != nil {
+			payload["last_recalled_at"] = after.LastRecalledAt.Format(time.RFC3339)
+		}
+		if after.Strength <= before.Strength {
+			payload["warning"] = fmt.Sprintf("strength did not increase (before=%f after=%f)", before.Strength, after.Strength)
+		}
+
+		r, err := jsonResult(payload)
 		return r, nil, err
 	})
 }

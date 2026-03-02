@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/urugus/second-brain/internal/store"
@@ -136,6 +137,34 @@ var noteShowCmd = &cobra.Command{
 	},
 }
 
+var noteRecallCmd = &cobra.Command{
+	Use:   "recall <id>",
+	Short: "Recall a note to reinforce memory strength",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid note ID: %s", args[0])
+		}
+
+		before, err := appStore.GetNote(id)
+		if err != nil {
+			return err
+		}
+		if err := appStore.RecallNote(id, time.Now().UTC(), "cli"); err != nil {
+			return err
+		}
+		after, err := appStore.GetNote(id)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Note #%d recalled. strength: %.3f -> %.3f (recall_count=%d)\n",
+			id, before.Strength, after.Strength, after.RecallCount)
+		return nil
+	},
+}
+
 func noteFilterForSession(sessionID int64) store.NoteFilter {
 	return store.NoteFilter{SessionID: &sessionID}
 }
@@ -148,6 +177,6 @@ func init() {
 	noteListCmd.Flags().Int64("session", 0, "Filter by session ID")
 	noteListCmd.Flags().String("tag", "", "Filter by tag")
 
-	noteCmd.AddCommand(noteAddCmd, noteListCmd, noteShowCmd)
+	noteCmd.AddCommand(noteAddCmd, noteListCmd, noteShowCmd, noteRecallCmd)
 	rootCmd.AddCommand(noteCmd)
 }
