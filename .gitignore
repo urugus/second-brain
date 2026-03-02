@@ -1,5 +1,6 @@
 sb
 dist/
+.claude/
 *.db
 *.db-wal
 *.db-shm
