@@ -77,7 +77,7 @@ func TestMigrateV4AddsMemoryColumns(t *testing.T) {
 	}
 }
 
-func TestMigrateFromV3ToV4BackfillsDefaults(t *testing.T) {
+func TestMigrateFromV3ToLatestBackfillsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	createSchemaV3Database(t, dbPath)
@@ -92,8 +92,8 @@ func TestMigrateFromV3ToV4BackfillsDefaults(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected schema version 4, got %d", version)
+	if version != 5 {
+		t.Fatalf("expected schema version 5, got %d", version)
 	}
 
 	var strength, decayRate, salience float64
@@ -120,6 +120,18 @@ func TestMigrateFromV3ToV4BackfillsDefaults(t *testing.T) {
 	}
 	if lastRecalledAt.Valid {
 		t.Fatalf("expected last_recalled_at NULL, got %q", lastRecalledAt.String)
+	}
+}
+
+func TestMigrateV5CreatesMemoryEdgesTable(t *testing.T) {
+	s := setupTestStore(t)
+
+	exists, err := tableExists(s.db, "memory_edges")
+	if err != nil {
+		t.Fatalf("check table exists: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected memory_edges table to exist")
 	}
 }
 
@@ -273,6 +285,121 @@ func TestDecayMemoriesUsesMostRecentMemoryTimestamp(t *testing.T) {
 	expectedSecond := afterFirst.Strength * math.Exp(-decayRate*1.0)
 	if !almostEqual(afterSecond.Strength, expectedSecond) {
 		t.Fatalf("unexpected second decay strength: got %f want %f", afterSecond.Strength, expectedSecond)
+	}
+}
+
+func TestLinkNotesUpsertReinforcesWeight(t *testing.T) {
+	s := setupTestStore(t)
+	a, _ := s.CreateNote("A", nil, nil, "")
+	b, _ := s.CreateNote("B", nil, nil, "")
+
+	if err := s.LinkNotes(a.ID, b.ID, 0.40, "first"); err != nil {
+		t.Fatalf("link notes first: %v", err)
+	}
+	var weight float64
+	var reinforced int
+	if err := s.db.QueryRow(
+		`SELECT weight, reinforced_count FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&weight, &reinforced); err != nil {
+		t.Fatalf("query edge: %v", err)
+	}
+	if !almostEqual(weight, 0.40) || reinforced != 1 {
+		t.Fatalf("unexpected first edge state: weight=%f reinforced=%d", weight, reinforced)
+	}
+
+	if err := s.LinkNotes(a.ID, b.ID, 0.40, "second"); err != nil {
+		t.Fatalf("link notes second: %v", err)
+	}
+	if err := s.db.QueryRow(
+		`SELECT weight, reinforced_count FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&weight, &reinforced); err != nil {
+		t.Fatalf("query reinforced edge: %v", err)
+	}
+	if weight <= 0.40 || weight > 1 {
+		t.Fatalf("expected reinforced weight in (0.40,1], got %f", weight)
+	}
+	if reinforced != 2 {
+		t.Fatalf("expected reinforced_count=2, got %d", reinforced)
+	}
+}
+
+func TestRelatedNotes(t *testing.T) {
+	s := setupTestStore(t)
+	a, _ := s.CreateNote("Seed", nil, nil, "")
+	b, _ := s.CreateNote("B direct", nil, nil, "")
+	c, _ := s.CreateNote("C direct", nil, nil, "")
+	d, _ := s.CreateNote("D indirect", nil, nil, "")
+
+	if err := s.LinkNotes(a.ID, b.ID, 0.90, "a->b"); err != nil {
+		t.Fatalf("link a->b: %v", err)
+	}
+	if err := s.LinkNotes(a.ID, c.ID, 0.30, "a->c"); err != nil {
+		t.Fatalf("link a->c: %v", err)
+	}
+	if err := s.LinkNotes(b.ID, d.ID, 0.80, "b->d"); err != nil {
+		t.Fatalf("link b->d: %v", err)
+	}
+
+	depth1, err := s.RelatedNotes(a.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes depth1: %v", err)
+	}
+	if len(depth1) != 2 {
+		t.Fatalf("expected 2 direct related notes, got %d", len(depth1))
+	}
+	if depth1[0].Note.ID != b.ID || depth1[1].Note.ID != c.ID {
+		t.Fatalf("unexpected depth1 order: [%d, %d]", depth1[0].Note.ID, depth1[1].Note.ID)
+	}
+
+	depth2, err := s.RelatedNotes(a.ID, 2, 10)
+	if err != nil {
+		t.Fatalf("related notes depth2: %v", err)
+	}
+	foundIndirect := false
+	for _, rn := range depth2 {
+		if rn.Note.ID == d.ID {
+			foundIndirect = true
+			break
+		}
+	}
+	if !foundIndirect {
+		t.Fatal("expected indirect note to appear with depth=2")
+	}
+}
+
+func TestRelatedNotesAvoidsCycleAmplification(t *testing.T) {
+	s := setupTestStore(t)
+	a, _ := s.CreateNote("A", nil, nil, "")
+	b, _ := s.CreateNote("B", nil, nil, "")
+	c, _ := s.CreateNote("C", nil, nil, "")
+
+	if err := s.LinkNotes(a.ID, b.ID, 0.9, "a->b"); err != nil {
+		t.Fatalf("link a->b: %v", err)
+	}
+	if err := s.LinkNotes(b.ID, a.ID, 0.9, "b->a"); err != nil {
+		t.Fatalf("link b->a: %v", err)
+	}
+	if err := s.LinkNotes(b.ID, c.ID, 0.5, "b->c"); err != nil {
+		t.Fatalf("link b->c: %v", err)
+	}
+
+	related, err := s.RelatedNotes(a.ID, 3, 10)
+	if err != nil {
+		t.Fatalf("related notes depth3: %v", err)
+	}
+
+	scoreByID := map[int64]float64{}
+	for _, rn := range related {
+		scoreByID[rn.Note.ID] = rn.Score
+	}
+
+	if !almostEqual(scoreByID[b.ID], 0.9) {
+		t.Fatalf("expected B score to remain direct-only 0.9, got %f", scoreByID[b.ID])
+	}
+	if scoreByID[c.ID] <= 0 {
+		t.Fatal("expected C to appear through B with positive score")
 	}
 }
 
@@ -553,6 +680,18 @@ func noteColumns(db *sql.DB) (map[string]struct{}, error) {
 		result[name] = struct{}{}
 	}
 	return result, rows.Err()
+}
+
+func tableExists(db *sql.DB, tableName string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+		tableName,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func createSchemaV3Database(t *testing.T, dbPath string) {

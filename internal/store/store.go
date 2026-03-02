@@ -57,6 +57,7 @@ func (s *Store) migrate() error {
 		migrateV2,
 		migrateV3,
 		migrateV4,
+		migrateV5,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -192,6 +193,31 @@ func migrateV4(tx *sql.Tx) error {
 		`ALTER TABLE notes ADD COLUMN salience REAL NOT NULL DEFAULT 0.50 CHECK (salience >= 0 AND salience <= 1)`,
 		`ALTER TABLE notes ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0 CHECK (recall_count >= 0)`,
 		`ALTER TABLE notes ADD COLUMN last_recalled_at TEXT`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:40], err)
+		}
+	}
+	return nil
+}
+
+func migrateV5(tx *sql.Tx) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS memory_edges (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			from_note_id     INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+			to_note_id       INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+			weight           REAL NOT NULL DEFAULT 0.10 CHECK (weight > 0 AND weight <= 1),
+			evidence         TEXT NOT NULL DEFAULT '',
+			reinforced_count INTEGER NOT NULL DEFAULT 1 CHECK (reinforced_count >= 1),
+			created_at       TEXT NOT NULL,
+			updated_at       TEXT NOT NULL,
+			CHECK (from_note_id <> to_note_id),
+			UNIQUE (from_note_id, to_note_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_memory_edges_from ON memory_edges(from_note_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_memory_edges_to ON memory_edges(to_note_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := tx.Exec(stmt); err != nil {

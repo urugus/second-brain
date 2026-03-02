@@ -26,6 +26,12 @@ type recallNoteInput struct {
 	Context string `json:"context,omitempty" jsonschema:"Optional recall context"`
 }
 
+type relatedNotesInput struct {
+	NoteID int64 `json:"note_id" jsonschema:"Seed note ID"`
+	Depth  int   `json:"depth,omitempty" jsonschema:"Traversal depth (default: 1)"`
+	Limit  int   `json:"limit,omitempty" jsonschema:"Max number of related notes (default: 10)"`
+}
+
 func registerNoteTools(server *gomcp.Server, s *store.Store) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_note",
@@ -98,6 +104,21 @@ func registerNoteTools(server *gomcp.Server, s *store.Store) {
 		}
 
 		r, err := jsonResult(payload)
+		return r, nil, err
+	})
+
+	gomcp.AddTool(server, &gomcp.Tool{
+		Name:        "related_notes",
+		Description: "List related notes from the memory edge graph",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input relatedNotesInput) (*gomcp.CallToolResult, any, error) {
+		related, err := s.RelatedNotes(input.NoteID, input.Depth, input.Limit)
+		if err != nil {
+			return errResult("failed to get related notes: " + err.Error()), nil, nil
+		}
+		if len(related) == 0 {
+			return textResult("No related notes found"), nil, nil
+		}
+		r, err := jsonResult(related)
 		return r, nil, err
 	})
 }

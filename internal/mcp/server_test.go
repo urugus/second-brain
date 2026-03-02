@@ -309,6 +309,47 @@ func TestRecallNote(t *testing.T) {
 	}
 }
 
+func TestRelatedNotes(t *testing.T) {
+	session, s, _ := setup(t)
+	seed, _ := s.CreateNote("Seed", nil, nil, "")
+	strong, _ := s.CreateNote("Strong link", nil, nil, "")
+	weak, _ := s.CreateNote("Weak link", nil, nil, "")
+
+	if err := s.LinkNotes(seed.ID, strong.ID, 0.9, "seed-strong"); err != nil {
+		t.Fatalf("link strong: %v", err)
+	}
+	if err := s.LinkNotes(seed.ID, weak.ID, 0.2, "seed-weak"); err != nil {
+		t.Fatalf("link weak: %v", err)
+	}
+
+	result := callTool(t, session, "related_notes", map[string]any{
+		"note_id": seed.ID,
+		"depth":   1,
+		"limit":   10,
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+
+	text := getTextContent(t, result)
+	var related []map[string]any
+	if err := json.Unmarshal([]byte(text), &related); err != nil {
+		t.Fatalf("failed to parse related notes: %v", err)
+	}
+	if len(related) != 2 {
+		t.Fatalf("expected 2 related notes, got %d", len(related))
+	}
+
+	firstNote := related[0]["Note"].(map[string]any)
+	secondNote := related[1]["Note"].(map[string]any)
+	if int64(firstNote["ID"].(float64)) != strong.ID {
+		t.Fatalf("expected first related note to be strong link (%d), got %v", strong.ID, firstNote["ID"])
+	}
+	if int64(secondNote["ID"].(float64)) != weak.ID {
+		t.Fatalf("expected second related note to be weak link (%d), got %v", weak.ID, secondNote["ID"])
+	}
+}
+
 func TestKBListEmpty(t *testing.T) {
 	session, _, _ := setup(t)
 	result := callTool(t, session, "kb_list", nil)
@@ -485,8 +526,8 @@ func TestToolsListCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 16 {
-		t.Errorf("expected 16 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 17 {
+		t.Errorf("expected 17 tools, got %d", len(result.Tools))
 		for _, tool := range result.Tools {
 			t.Logf("  - %s", tool.Name)
 		}
