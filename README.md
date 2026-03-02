@@ -12,6 +12,7 @@ A personal knowledge management CLI that captures work sessions, tasks, notes, a
 - **Knowledge Base** — Persistent markdown files organized by topic
 - **Session Consolidation** — AI-powered extraction of session knowledge into the KB
 - **External Sync** — Periodic collection of information from external sources
+  with adaptive relevance prioritization learned from saved notes/tasks
 - **MCP Server** — Expose all capabilities to Claude Code via Model Context Protocol
 
 ## Installation
@@ -134,11 +135,16 @@ Tune behavior with environment variables:
 - `SB_SLEEP_REPLAY_ALPHA`
 - `SB_SLEEP_DUPLICATE_REPLAY_WEIGHT`
 - `SB_METRICS_WINDOW_DAYS`
+- `SB_SYNC_FOCUS_NOTES_LIMIT`
+- `SB_SYNC_FOCUS_TASKS_LIMIT`
+- `SB_SYNC_FOCUS_TAGS_MAX`
+- `SB_SYNC_FOCUS_TERMS_MAX`
 
 Feature flags for rollback:
 
 - `SB_FEATURE_PREDICTION_LEARNING=0|1`
 - `SB_FEATURE_SLEEP_REPLAY=0|1`
+- `SB_FEATURE_SYNC_FOCUS_LEARNING=0|1`
 
 Details: [Phase 5 operations playbook](docs/phase5-operations-playbook.ja.md)
 

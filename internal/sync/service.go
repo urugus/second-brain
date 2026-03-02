@@ -53,8 +53,8 @@ func NewService(s *store.Store, executor adapter.CommandExecutor, modelName stri
 
 // Run executes a single sync: call claude -p with MCP tools, parse result, log.
 func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
-	prompt := defaultSyncPrompt
 	runtimeCfg := config.LoadRuntime()
+	prompt := buildSyncPrompt(s.buildSyncFocusProfile(runtimeCfg))
 	predictedNotes, predictedTasks := s.estimateExpectedSyncOutcome(runtimeCfg.SyncPredictionWindow)
 
 	// Create log entry
