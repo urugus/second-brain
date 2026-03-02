@@ -328,7 +328,7 @@ func TestSleepConsolidate_AllKBWritesFail(t *testing.T) {
 	if result != nil {
 		t.Fatal("expected nil result on total KB write failure")
 	}
-	if !strings.Contains(err.Error(), "all KB writes failed") {
+	if !strings.Contains(err.Error(), "kb writes failed") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -338,6 +338,57 @@ func TestSleepConsolidate_AllKBWritesFail(t *testing.T) {
 	}
 	if after.ConsolidatedAt != nil {
 		t.Fatalf("note %d should remain unconsolidated on failure", note.ID)
+	}
+}
+
+func TestSleepConsolidate_PartialKBWritesFailAndKeepNotesUnconsolidated(t *testing.T) {
+	s, k := setupTest(t)
+
+	note, _ := s.CreateNote("partial failure note", nil, []string{"ops"}, "manual")
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Should partially fail write",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "ops/ok.md", Content: "# OK\n", Reason: "valid path"},
+				{Path: "../outside.md", Content: "x", Reason: "invalid path"},
+			},
+			SuggestedTasks: []string{"task should not be created"},
+		},
+	}
+	svc := NewService(s, k, agent)
+
+	result, err := svc.SleepConsolidate(context.Background(), 1)
+	if err == nil {
+		t.Fatal("expected error when some KB writes fail")
+	}
+	if result != nil {
+		t.Fatal("expected nil result on partial KB write failure")
+	}
+	if !strings.Contains(err.Error(), "kb writes failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Some files may already be written before the failure is detected.
+	if !k.Exists("ops/ok.md") {
+		t.Fatal("expected valid KB write to be present")
+	}
+
+	after, err := s.GetNote(note.ID)
+	if err != nil {
+		t.Fatalf("get note: %v", err)
+	}
+	if after.ConsolidatedAt != nil {
+		t.Fatalf("note %d should remain unconsolidated on partial failure", note.ID)
+	}
+
+	tasks, err := s.ListTasks(store.TaskFilter{})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Title == "task should not be created" {
+			t.Fatal("suggested tasks must not be created when KB writes fail")
+		}
 	}
 }
 

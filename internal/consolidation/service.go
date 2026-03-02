@@ -239,12 +239,17 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		_ = s.kb.Write(path, existing+section)
 	}
 
-	if len(writeErrors) > 0 && len(appliedFiles) == 0 {
-		errMsg := fmt.Sprintf("all KB writes failed: %s", strings.Join(writeErrors, "; "))
+	if len(writeErrors) > 0 {
+		errMsg := fmt.Sprintf(
+			"kb writes failed (%d/%d): %s",
+			len(writeErrors),
+			len(dedupedKBUpdates),
+			strings.Join(writeErrors, "; "),
+		)
 		if runtimeCfg.PredictionLearningEnabled {
-			s.recordSleepPredictionError(predictedKBUpdates, 0)
+			s.recordSleepPredictionError(predictedKBUpdates, float64(len(appliedFiles)))
 		}
-		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, "")
+		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, strings.Join(appliedFiles, ","))
 		return nil, fmt.Errorf("%s", errMsg)
 	}
 
