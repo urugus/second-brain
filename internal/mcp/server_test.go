@@ -7,12 +7,40 @@ import (
 	"testing"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/urugus/second-brain/internal/adapter"
 	"github.com/urugus/second-brain/internal/kb"
 	sbmcp "github.com/urugus/second-brain/internal/mcp"
 	"github.com/urugus/second-brain/internal/store"
 )
 
+// mockAgent implements adapter.Agent for MCP consolidation tests.
+type mockAgent struct {
+	result *adapter.ConsolidationResult
+	err    error
+}
+
+func (m *mockAgent) Name() string { return "mock" }
+
+func (m *mockAgent) Consolidate(_ context.Context, _ adapter.ConsolidationRequest) (*adapter.ConsolidationResult, error) {
+	return m.result, m.err
+}
+
+func (m *mockAgent) Summarize(_ context.Context, text string) (string, error) {
+	return "summary", nil
+}
+
 func setup(t *testing.T) (*gomcp.ClientSession, *store.Store, *kb.KB) {
+	t.Helper()
+	return setupWithOpts(t)
+}
+
+func setupWithMock(t *testing.T, agent *mockAgent) (*gomcp.ClientSession, *store.Store, *kb.KB) {
+	t.Helper()
+	factory := func(_ string) adapter.Agent { return agent }
+	return setupWithOpts(t, sbmcp.WithAgentFactory(factory))
+}
+
+func setupWithOpts(t *testing.T, opts ...sbmcp.Option) (*gomcp.ClientSession, *store.Store, *kb.KB) {
 	t.Helper()
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -23,7 +51,7 @@ func setup(t *testing.T) (*gomcp.ClientSession, *store.Store, *kb.KB) {
 
 	k := kb.New(filepath.Join(dir, "knowledge"))
 
-	server := sbmcp.New(s, k)
+	server := sbmcp.New(s, k, opts...)
 	serverTransport, clientTransport := gomcp.NewInMemoryTransports()
 
 	ctx := context.Background()
@@ -405,10 +433,183 @@ func TestToolsListCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 14 {
-		t.Errorf("expected 14 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 15 {
+		t.Errorf("expected 15 tools, got %d", len(result.Tools))
 		for _, tool := range result.Tools {
 			t.Logf("  - %s", tool.Name)
 		}
+	}
+}
+
+func TestConsolidate_ProposeMode(t *testing.T) {
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Session focused on testing.",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "testing/approach.md",
+					Content: "# Testing Approach\n\nUse table-driven tests.\n",
+					Reason:  "Document testing approach",
+				},
+			},
+			SuggestedTasks: []string{"Write more tests"},
+		},
+	}
+	session, s, _ := setupWithMock(t, agent)
+
+	// Create and complete a session
+	sess, _ := s.CreateSession("Test Session", "test goal")
+	s.CreateTask("Task 1", "do something", &sess.ID, 1)
+	s.CreateNote("interesting finding", &sess.ID, []string{"research"}, "manual")
+	s.EndSession(sess.ID, "completed work")
+
+	result := callTool(t, session, "consolidate", map[string]any{
+		"session_id": sess.ID,
+		"mode":       "propose",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+	text := getTextContent(t, result)
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["status"] != "proposed" {
+		t.Errorf("expected status 'proposed', got %v", resp["status"])
+	}
+	if resp["summary"] != "Session focused on testing." {
+		t.Errorf("unexpected summary: %v", resp["summary"])
+	}
+	kbUpdates, ok := resp["kb_updates"].([]any)
+	if !ok || len(kbUpdates) != 1 {
+		t.Errorf("expected 1 KB update, got %v", resp["kb_updates"])
+	}
+	suggestedTasks, ok := resp["suggested_tasks"].([]any)
+	if !ok || len(suggestedTasks) != 1 {
+		t.Errorf("expected 1 suggested task, got %v", resp["suggested_tasks"])
+	}
+}
+
+func TestConsolidate_ApplyMode(t *testing.T) {
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Applied session changes.",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "notes/session.md",
+					Content: "# Session Notes\n\nKey findings.\n",
+					Reason:  "Capture session notes",
+				},
+			},
+			SuggestedTasks: []string{"Follow up on findings"},
+		},
+	}
+	session, s, k := setupWithMock(t, agent)
+
+	sess, _ := s.CreateSession("Apply Session", "apply goal")
+	s.EndSession(sess.ID, "done")
+
+	result := callTool(t, session, "consolidate", map[string]any{
+		"session_id": sess.ID,
+		"mode":       "apply",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+	text := getTextContent(t, result)
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["status"] != "applied" {
+		t.Errorf("expected status 'applied', got %v", resp["status"])
+	}
+
+	// Verify KB file was written
+	if !k.Exists("notes/session.md") {
+		t.Error("expected KB file notes/session.md to exist after apply")
+	}
+	content, err := k.Read("notes/session.md")
+	if err != nil {
+		t.Fatalf("failed to read KB file: %v", err)
+	}
+	if content != "# Session Notes\n\nKey findings.\n" {
+		t.Errorf("unexpected KB content: %q", content)
+	}
+
+	// Verify task was created
+	tasks, _ := s.ListTasks(store.TaskFilter{})
+	found := false
+	for _, task := range tasks {
+		if task.Title == "Follow up on findings" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected suggested task to be created after apply")
+	}
+}
+
+func TestConsolidate_LatestUnconsolidated(t *testing.T) {
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary:   "Auto-found session.",
+			KBUpdates: []adapter.KBUpdate{},
+		},
+	}
+	session, s, _ := setupWithMock(t, agent)
+
+	// Create and complete a session (don't specify session_id)
+	sess, _ := s.CreateSession("Auto Session", "")
+	s.EndSession(sess.ID, "done")
+
+	result := callTool(t, session, "consolidate", map[string]any{
+		"mode": "propose",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+	text := getTextContent(t, result)
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	// Should have found the session automatically
+	sessionID := resp["session_id"].(float64)
+	if int64(sessionID) != sess.ID {
+		t.Errorf("expected session_id %d, got %v", sess.ID, sessionID)
+	}
+}
+
+func TestConsolidate_InvalidMode(t *testing.T) {
+	session, _, _ := setup(t)
+
+	result := callTool(t, session, "consolidate", map[string]any{
+		"mode": "invalid",
+	})
+	if !result.IsError {
+		t.Error("expected error for invalid mode")
+	}
+	text := getTextContent(t, result)
+	if text != `invalid mode "invalid": must be 'propose' or 'apply'` {
+		t.Errorf("unexpected error message: %q", text)
+	}
+}
+
+func TestConsolidate_NoUnconsolidatedSessions(t *testing.T) {
+	session, _, _ := setup(t)
+
+	result := callTool(t, session, "consolidate", nil)
+	if !result.IsError {
+		t.Error("expected error when no sessions available")
+	}
+	text := getTextContent(t, result)
+	if text != "no unconsolidated sessions found" {
+		t.Errorf("unexpected error message: %q", text)
 	}
 }
