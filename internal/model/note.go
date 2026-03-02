@@ -8,6 +8,11 @@ type Note struct {
 	Content        string
 	Tags           []string
 	Source         string
+	Strength       float64
+	DecayRate      float64
+	Salience       float64
+	RecallCount    int
+	LastRecalledAt *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	ConsolidatedAt *time.Time
