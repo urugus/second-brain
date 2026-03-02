@@ -11,8 +11,9 @@ import (
 )
 
 type NoteFilter struct {
-	SessionID *int64
-	Tag       *string
+	SessionID      *int64
+	Tag            *string
+	Unconsolidated bool
 }
 
 func (s *Store) CreateNote(content string, sessionID *int64, tags []string, source string) (*model.Note, error) {
@@ -58,13 +59,13 @@ func (s *Store) CreateNote(content string, sessionID *int64, tags []string, sour
 
 func (s *Store) GetNote(id int64) (*model.Note, error) {
 	row := s.db.QueryRow(
-		`SELECT id, session_id, content, tags, source, created_at, updated_at FROM notes WHERE id = ?`, id,
+		`SELECT id, session_id, content, tags, source, created_at, updated_at, consolidated_at FROM notes WHERE id = ?`, id,
 	)
 	return scanNote(row)
 }
 
 func (s *Store) ListNotes(filter NoteFilter) ([]model.Note, error) {
-	query := `SELECT id, session_id, content, tags, source, created_at, updated_at FROM notes WHERE 1=1`
+	query := `SELECT id, session_id, content, tags, source, created_at, updated_at, consolidated_at FROM notes WHERE 1=1`
 	var args []any
 
 	if filter.SessionID != nil {
@@ -72,9 +73,11 @@ func (s *Store) ListNotes(filter NoteFilter) ([]model.Note, error) {
 		args = append(args, *filter.SessionID)
 	}
 	if filter.Tag != nil {
-		// Match tag in comma-separated list
 		query += ` AND (',' || tags || ',' LIKE '%,' || ? || ',%')`
 		args = append(args, *filter.Tag)
+	}
+	if filter.Unconsolidated {
+		query += ` AND consolidated_at IS NULL`
 	}
 	query += ` ORDER BY id DESC`
 
@@ -95,13 +98,48 @@ func (s *Store) ListNotes(filter NoteFilter) ([]model.Note, error) {
 	return notes, rows.Err()
 }
 
+func (s *Store) CountUnconsolidatedNotes() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM notes WHERE consolidated_at IS NULL`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count unconsolidated notes: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) MarkNotesConsolidated(noteIDs []int64) error {
+	if len(noteIDs) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	placeholders := make([]string, len(noteIDs))
+	args := make([]any, len(noteIDs)+1)
+	args[0] = now
+	for i, id := range noteIDs {
+		placeholders[i] = "?"
+		args[i+1] = id
+	}
+
+	query := fmt.Sprintf(
+		`UPDATE notes SET consolidated_at = ? WHERE id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)
+	_, err := s.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("mark notes consolidated: %w", err)
+	}
+	return nil
+}
+
 func scanNote(row *sql.Row) (*model.Note, error) {
 	var n model.Note
 	var sessionID sql.NullInt64
 	var tagsStr string
 	var createdAt, updatedAt string
+	var consolidatedAt sql.NullString
 
-	err := row.Scan(&n.ID, &sessionID, &n.Content, &tagsStr, &n.Source, &createdAt, &updatedAt)
+	err := row.Scan(&n.ID, &sessionID, &n.Content, &tagsStr, &n.Source, &createdAt, &updatedAt, &consolidatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +152,10 @@ func scanNote(row *sql.Row) (*model.Note, error) {
 	}
 	n.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	if consolidatedAt.Valid {
+		t, _ := time.Parse(time.RFC3339, consolidatedAt.String)
+		n.ConsolidatedAt = &t
+	}
 	return &n, nil
 }
 
@@ -122,8 +164,9 @@ func scanNoteFromRows(rows *sql.Rows) (*model.Note, error) {
 	var sessionID sql.NullInt64
 	var tagsStr string
 	var createdAt, updatedAt string
+	var consolidatedAt sql.NullString
 
-	err := rows.Scan(&n.ID, &sessionID, &n.Content, &tagsStr, &n.Source, &createdAt, &updatedAt)
+	err := rows.Scan(&n.ID, &sessionID, &n.Content, &tagsStr, &n.Source, &createdAt, &updatedAt, &consolidatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("scan note: %w", err)
 	}
@@ -136,5 +179,9 @@ func scanNoteFromRows(rows *sql.Rows) (*model.Note, error) {
 	}
 	n.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	if consolidatedAt.Valid {
+		t, _ := time.Parse(time.RFC3339, consolidatedAt.String)
+		n.ConsolidatedAt = &t
+	}
 	return &n, nil
 }

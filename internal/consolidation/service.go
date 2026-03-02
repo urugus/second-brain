@@ -88,6 +88,7 @@ func (s *Service) Propose(ctx context.Context, sessionID int64) (*ProposedChange
 
 	// Call agent
 	req := adapter.ConsolidationRequest{
+		Mode:       "session",
 		Session:    session,
 		Notes:      notes,
 		Tasks:      tasks,
@@ -124,6 +125,92 @@ func (s *Service) Propose(ctx context.Context, sessionID int64) (*ProposedChange
 		Summary:        result.Summary,
 		KBUpdates:      proposals,
 		SuggestedTasks: result.SuggestedTasks,
+	}, nil
+}
+
+// SleepResult holds the outcome of a sleep-mode consolidation.
+type SleepResult struct {
+	LogID          int64
+	NotesProcessed int
+	Summary        string
+	KBFilesUpdated []string
+	TasksCreated   int
+}
+
+// SleepConsolidate runs autonomous consolidation on unconsolidated notes.
+// Returns nil, nil if unconsolidated notes are below the threshold.
+func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepResult, error) {
+	count, err := s.store.CountUnconsolidatedNotes()
+	if err != nil {
+		return nil, fmt.Errorf("count unconsolidated notes: %w", err)
+	}
+	if count < threshold {
+		return nil, nil
+	}
+
+	notes, err := s.store.ListNotes(store.NoteFilter{Unconsolidated: true})
+	if err != nil {
+		return nil, fmt.Errorf("list unconsolidated notes: %w", err)
+	}
+	if len(notes) == 0 {
+		return nil, nil
+	}
+
+	cl, err := s.store.CreateSleepConsolidationLog(s.agent.Name())
+	if err != nil {
+		return nil, fmt.Errorf("create consolidation log: %w", err)
+	}
+
+	kbFiles, err := s.kb.List()
+	if err != nil {
+		kbFiles = []string{}
+	}
+
+	s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationRunning, "", "")
+
+	req := adapter.ConsolidationRequest{
+		Mode:       "sleep",
+		Notes:      notes,
+		ExistingKB: kbFiles,
+	}
+
+	result, err := s.agent.Consolidate(ctx, req)
+	if err != nil {
+		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, fmt.Sprintf("agent error: %v", err), "")
+		return nil, fmt.Errorf("agent consolidation: %w", err)
+	}
+
+	var appliedFiles []string
+	for _, u := range result.KBUpdates {
+		if err := s.kb.Write(u.Path, u.Content); err != nil {
+			continue
+		}
+		appliedFiles = append(appliedFiles, u.Path)
+	}
+
+	for _, taskTitle := range result.SuggestedTasks {
+		s.store.CreateTask(taskTitle, "", nil, 0)
+	}
+
+	noteIDs := make([]int64, len(notes))
+	for i, n := range notes {
+		noteIDs[i] = n.ID
+	}
+	s.store.MarkNotesConsolidated(noteIDs)
+
+	s.store.UpdateConsolidationLog(
+		cl.ID,
+		model.ConsolidationCompleted,
+		result.Summary,
+		strings.Join(appliedFiles, ","),
+	)
+
+	return &SleepResult{
+		LogID:          cl.ID,
+		NotesProcessed: len(notes),
+		Summary:        result.Summary,
+		KBFilesUpdated: appliedFiles,
+		TasksCreated:   len(result.SuggestedTasks),
 	}, nil
 }
 
