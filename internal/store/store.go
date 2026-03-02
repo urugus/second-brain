@@ -54,6 +54,7 @@ func (s *Store) migrate() error {
 
 	migrations := []func(tx *sql.Tx) error{
 		migrateV1,
+		migrateV2,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -149,4 +150,22 @@ func migrateV1(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+func migrateV2(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS sync_log (
+		id               INTEGER PRIMARY KEY AUTOINCREMENT,
+		agent            TEXT NOT NULL DEFAULT '',
+		prompt_used      TEXT NOT NULL DEFAULT '',
+		output_summary   TEXT NOT NULL DEFAULT '',
+		notes_added      INTEGER NOT NULL DEFAULT 0,
+		tasks_added      INTEGER NOT NULL DEFAULT 0,
+		kb_files_updated TEXT NOT NULL DEFAULT '',
+		duration_ms      INTEGER NOT NULL DEFAULT 0,
+		status           TEXT NOT NULL DEFAULT 'pending'
+		                 CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+		error_message    TEXT NOT NULL DEFAULT '',
+		created_at       TEXT NOT NULL
+	)`)
+	return err
 }
