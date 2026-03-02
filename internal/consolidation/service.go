@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/urugus/second-brain/internal/adapter"
+	"github.com/urugus/second-brain/internal/config"
 	"github.com/urugus/second-brain/internal/kb"
 	"github.com/urugus/second-brain/internal/model"
 	"github.com/urugus/second-brain/internal/store"
@@ -159,7 +160,8 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	if len(notes) == 0 {
 		return nil, nil
 	}
-	replayPlan := buildSleepReplayPlan(notes)
+	runtimeCfg := config.LoadRuntime()
+	replayPlan := buildSleepReplayPlan(notes, runtimeCfg.SleepDuplicateReplayWeight, runtimeCfg.SleepReplayEnabled)
 	if len(replayPlan.replayNotes) == 0 {
 		return nil, nil
 	}
@@ -202,7 +204,9 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 
 	if len(writeErrors) > 0 && len(appliedFiles) == 0 {
 		errMsg := fmt.Sprintf("all KB writes failed: %s", strings.Join(writeErrors, "; "))
-		s.recordSleepPredictionError(predictedKBUpdates, 0)
+		if runtimeCfg.PredictionLearningEnabled {
+			s.recordSleepPredictionError(predictedKBUpdates, 0)
+		}
 		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, "")
 		return nil, fmt.Errorf("%s", errMsg)
 	}
@@ -214,10 +218,22 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		}
 	}
 
-	if err := s.store.ApplySleepReplayConsolidation(replayPlan.replayWeightByNoteID, time.Now().UTC()); err != nil {
-		errMsg := fmt.Sprintf("update note consolidation state: %v", err)
-		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, strings.Join(appliedFiles, ","))
-		return nil, fmt.Errorf("%s", errMsg)
+	if runtimeCfg.SleepReplayEnabled {
+		if err := s.store.ApplySleepReplayConsolidation(replayPlan.replayWeightByNoteID, time.Now().UTC()); err != nil {
+			errMsg := fmt.Sprintf("update note consolidation state: %v", err)
+			s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, strings.Join(appliedFiles, ","))
+			return nil, fmt.Errorf("%s", errMsg)
+		}
+	} else {
+		noteIDs := make([]int64, len(notes))
+		for i, n := range notes {
+			noteIDs[i] = n.ID
+		}
+		if err := s.store.MarkNotesConsolidated(noteIDs); err != nil {
+			errMsg := fmt.Sprintf("mark notes consolidated: %v", err)
+			s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, strings.Join(appliedFiles, ","))
+			return nil, fmt.Errorf("%s", errMsg)
+		}
 	}
 
 	s.store.UpdateConsolidationLog(
@@ -226,7 +242,9 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		result.Summary,
 		strings.Join(appliedFiles, ","),
 	)
-	s.recordSleepPredictionError(predictedKBUpdates, float64(len(appliedFiles)))
+	if runtimeCfg.PredictionLearningEnabled {
+		s.recordSleepPredictionError(predictedKBUpdates, float64(len(appliedFiles)))
+	}
 
 	return &SleepResult{
 		LogID:            cl.ID,
@@ -245,10 +263,21 @@ type sleepReplayPlan struct {
 	duplicatesMerged     int
 }
 
-func buildSleepReplayPlan(notes []model.Note) sleepReplayPlan {
+func buildSleepReplayPlan(notes []model.Note, duplicateWeight float64, replayEnabled bool) sleepReplayPlan {
 	if len(notes) == 0 {
 		return sleepReplayPlan{
 			replayWeightByNoteID: map[int64]float64{},
+		}
+	}
+	if !replayEnabled {
+		replayWeightByNoteID := make(map[int64]float64, len(notes))
+		for _, n := range notes {
+			replayWeightByNoteID[n.ID] = 1.0
+		}
+		return sleepReplayPlan{
+			replayNotes:          notes,
+			replayWeightByNoteID: replayWeightByNoteID,
+			duplicatesMerged:     0,
 		}
 	}
 
@@ -277,11 +306,11 @@ func buildSleepReplayPlan(notes []model.Note) sleepReplayPlan {
 
 		current := b.canonical
 		if shouldReplaceCanonical(current, n) {
-			replayWeightByNoteID[current.ID] = 0.35
+			replayWeightByNoteID[current.ID] = duplicateWeight
 			b.canonical = n
 			replayWeightByNoteID[n.ID] = 1.0
 		} else {
-			replayWeightByNoteID[n.ID] = 0.35
+			replayWeightByNoteID[n.ID] = duplicateWeight
 		}
 		duplicatesMerged++
 	}

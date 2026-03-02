@@ -31,6 +31,11 @@ func (m *mockAgent) Summarize(ctx context.Context, text string) (string, error) 
 
 func setupTest(t *testing.T) (*store.Store, *kb.KB) {
 	t.Helper()
+	t.Setenv("SB_FEATURE_PREDICTION_LEARNING", "1")
+	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "1")
+	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "0.18")
+	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "0.35")
+
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -373,4 +378,59 @@ func TestSleepConsolidate_RecordsPredictionError(t *testing.T) {
 	if !found {
 		t.Fatal("expected sleep kb_updates prediction log")
 	}
+}
+
+func TestSleepConsolidate_SleepReplayDisabled(t *testing.T) {
+	s, k := setupTest(t)
+	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "0")
+
+	n1, _ := s.CreateNote("same note", nil, nil, "manual")
+	n2, _ := s.CreateNote("same note", nil, nil, "sync")
+	before := map[int64]float64{
+		n1.ID: n1.Strength,
+		n2.ID: n2.Strength,
+	}
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "legacy sleep",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "legacy/sleep.md", Content: "# Legacy\n", Reason: "legacy"},
+			},
+		},
+	}
+	svc := NewService(s, k, agent)
+	result, err := svc.SleepConsolidate(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected sleep result")
+	}
+	if result.DuplicatesMerged != 0 {
+		t.Fatalf("expected no dedupe when replay disabled, got %d", result.DuplicatesMerged)
+	}
+	if len(agent.lastReq.Notes) != 2 {
+		t.Fatalf("expected all notes passed through when replay disabled, got %d", len(agent.lastReq.Notes))
+	}
+
+	after1, _ := s.GetNote(n1.ID)
+	after2, _ := s.GetNote(n2.ID)
+	if after1.ConsolidatedAt == nil || after2.ConsolidatedAt == nil {
+		t.Fatal("expected notes to be consolidated")
+	}
+	if !almostEqual(before[n1.ID], after1.Strength) {
+		t.Fatalf("strength should remain unchanged when replay disabled: before=%f after=%f", before[n1.ID], after1.Strength)
+	}
+	if !almostEqual(before[n2.ID], after2.Strength) {
+		t.Fatalf("strength should remain unchanged when replay disabled: before=%f after=%f", before[n2.ID], after2.Strength)
+	}
+}
+
+func almostEqual(a, b float64) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < 1e-9
 }

@@ -194,6 +194,9 @@ go test ./internal/sync ./internal/consolidation -run Prediction -v
 
 ## Phase 5: 運用安定化
 
+### 実行パケット
+- 運用プレイブック: [phase5-operations-playbook.ja.md](/Users/urugus/dev/second-brain/docs/phase5-operations-playbook.ja.md)
+
 ### スコープ
 - メトリクス可視化
 - チューニングパラメータ外部化

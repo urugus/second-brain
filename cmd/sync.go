@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urugus/second-brain/internal/adapter"
 	claudeAdapter "github.com/urugus/second-brain/internal/adapter/claude"
+	"github.com/urugus/second-brain/internal/config"
 	"github.com/urugus/second-brain/internal/consolidation"
 	sbsync "github.com/urugus/second-brain/internal/sync"
 )
@@ -143,7 +144,32 @@ var syncLogCmd = &cobra.Command{
 	},
 }
 
-const defaultSleepThreshold = 10
+var syncMetricsCmd = &cobra.Command{
+	Use:   "metrics",
+	Short: "Show operational KPIs",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		days, _ := cmd.Flags().GetInt("days")
+		metrics, err := appStore.ComputeOperationalMetrics(days)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Operational metrics (last %d days)\n", metrics.WindowDays)
+		fmt.Printf("  Duplicate note rate: %.2f%% (%d/%d)\n",
+			metrics.DuplicateNoteRate*100,
+			metrics.DuplicateNotes, metrics.NotesTotal,
+		)
+		fmt.Printf("  Useful task generation rate: %.2f%% (%d/%d)\n",
+			metrics.UsefulTaskGenerationRate*100,
+			metrics.TasksDone, metrics.TasksTotal,
+		)
+		fmt.Printf("  KB rework rate: %.2f%% (%d/%d)\n",
+			metrics.KBReworkRate*100,
+			metrics.ReworkedKBFiles, metrics.UniqueKBFilesUpdated,
+		)
+		return nil
+	},
+}
 
 func trySleepConsolidate(cmd *cobra.Command, modelFlag string) error {
 	var opts []claudeAdapter.Option
@@ -153,8 +179,9 @@ func trySleepConsolidate(cmd *cobra.Command, modelFlag string) error {
 	agent := claudeAdapter.New(opts...)
 
 	svc := consolidation.NewService(appStore, appKB, agent)
+	threshold := config.LoadRuntime().SleepThreshold
 
-	sleepResult, err := svc.SleepConsolidate(cmd.Context(), defaultSleepThreshold)
+	sleepResult, err := svc.SleepConsolidate(cmd.Context(), threshold)
 	if err != nil {
 		return err
 	}
@@ -177,10 +204,13 @@ func trySleepConsolidate(cmd *cobra.Command, modelFlag string) error {
 }
 
 func init() {
+	runtimeCfg := config.LoadRuntime()
+
 	syncRunCmd.Flags().String("model", "", "Claude model to use")
 	syncEnableCmd.Flags().String("interval", "30m", "Sync interval (e.g. 30m, 1h, 6h)")
 	syncLogCmd.Flags().Int("limit", 10, "Number of log entries to show")
+	syncMetricsCmd.Flags().Int("days", runtimeCfg.MetricsWindowDays, "Metrics window in days")
 
-	syncCmd.AddCommand(syncRunCmd, syncEnableCmd, syncDisableCmd, syncStatusCmd, syncLogCmd)
+	syncCmd.AddCommand(syncRunCmd, syncEnableCmd, syncDisableCmd, syncStatusCmd, syncLogCmd, syncMetricsCmd)
 	rootCmd.AddCommand(syncCmd)
 }

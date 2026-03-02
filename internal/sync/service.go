@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/urugus/second-brain/internal/adapter"
+	"github.com/urugus/second-brain/internal/config"
 	"github.com/urugus/second-brain/internal/model"
 	"github.com/urugus/second-brain/internal/store"
 )
@@ -46,11 +47,6 @@ type Service struct {
 	model    string
 }
 
-const (
-	syncPredictionWindow = 5
-	priorityAdjustLimit  = 5
-)
-
 func NewService(s *store.Store, executor adapter.CommandExecutor, modelName string) *Service {
 	return &Service{store: s, executor: executor, model: modelName}
 }
@@ -58,7 +54,8 @@ func NewService(s *store.Store, executor adapter.CommandExecutor, modelName stri
 // Run executes a single sync: call claude -p with MCP tools, parse result, log.
 func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	prompt := defaultSyncPrompt
-	predictedNotes, predictedTasks := s.estimateExpectedSyncOutcome()
+	runtimeCfg := config.LoadRuntime()
+	predictedNotes, predictedTasks := s.estimateExpectedSyncOutcome(runtimeCfg.SyncPredictionWindow)
 
 	// Create log entry
 	sl, err := s.store.CreateSyncLog("claude-code", prompt)
@@ -103,9 +100,11 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	result.PredictedTasks = predictedTasks
 	result.NotesError = float64(result.NotesAdded) - predictedNotes
 	result.TasksError = float64(result.TasksAdded) - predictedTasks
-	result.PriorityDelta = priorityDeltaFromError(result.TasksError)
-	result.AdjustedTasks = s.applyPriorityLearning(result.PriorityDelta)
-	s.recordPredictionErrors(result)
+	if runtimeCfg.PredictionLearningEnabled {
+		result.PriorityDelta = priorityDeltaFromError(result.TasksError)
+		result.AdjustedTasks = s.applyPriorityLearning(result.PriorityDelta, runtimeCfg.PriorityAdjustLimit)
+		s.recordPredictionErrors(result)
+	}
 
 	// Log success
 	kbFiles := strings.Join(result.KBFilesUpdated, ",")
@@ -147,16 +146,16 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-func (s *Service) estimateExpectedSyncOutcome() (float64, float64) {
-	predictedNotes, predictedTasks, err := s.store.EstimateSyncPrediction(syncPredictionWindow)
+func (s *Service) estimateExpectedSyncOutcome(window int) (float64, float64) {
+	predictedNotes, predictedTasks, err := s.store.EstimateSyncPrediction(window)
 	if err != nil {
 		return 0, 0
 	}
 	return predictedNotes, predictedTasks
 }
 
-func (s *Service) applyPriorityLearning(priorityDelta int) int {
-	adjusted, err := s.store.AdjustTodoTaskPriorities(priorityDelta, priorityAdjustLimit)
+func (s *Service) applyPriorityLearning(priorityDelta int, limit int) int {
+	adjusted, err := s.store.AdjustTodoTaskPriorities(priorityDelta, limit)
 	if err != nil {
 		return 0
 	}

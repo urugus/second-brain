@@ -23,6 +23,11 @@ func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string)
 
 func setupTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	t.Setenv("SB_FEATURE_PREDICTION_LEARNING", "1")
+	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
+	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
+	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
+
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -297,6 +302,43 @@ func TestPriorityDeltaFromError(t *testing.T) {
 		if got != c.want {
 			t.Fatalf("priorityDeltaFromError(%f)=%d want %d", c.err, got, c.want)
 		}
+	}
+}
+
+func TestSyncRun_PredictionLearningDisabled(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_PREDICTION_LEARNING", "0")
+
+	task, _ := s.CreateTask("task", "", nil, 1)
+
+	syncResult := SyncResult{
+		Summary:    "disabled prediction",
+		NotesAdded: 1,
+		TasksAdded: 4,
+	}
+	envelope := claudeJSONResponse{Type: "result", StructuredOutput: &syncResult}
+	envelopeJSON, _ := json.Marshal(envelope)
+
+	svc := NewService(s, &mockExecutor{output: envelopeJSON}, "")
+	result, err := svc.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync run: %v", err)
+	}
+	if result.PriorityDelta != 0 || result.AdjustedTasks != 0 {
+		t.Fatalf("priority learning should be disabled, got delta=%d adjusted=%d", result.PriorityDelta, result.AdjustedTasks)
+	}
+
+	afterTask, _ := s.GetTask(task.ID)
+	if afterTask.Priority != 1 {
+		t.Fatalf("task priority should not change when disabled, got %d", afterTask.Priority)
+	}
+
+	logs, err := s.ListPredictionErrors(5)
+	if err != nil {
+		t.Fatalf("list prediction logs: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected no prediction logs when disabled, got %d", len(logs))
 	}
 }
 
