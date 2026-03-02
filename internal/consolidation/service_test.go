@@ -331,3 +331,46 @@ func TestSleepConsolidate_AllKBWritesFail(t *testing.T) {
 		t.Fatalf("note %d should remain unconsolidated on failure", note.ID)
 	}
 }
+
+func TestSleepConsolidate_RecordsPredictionError(t *testing.T) {
+	s, k := setupTest(t)
+
+	if _, err := s.CreateNote("predictive sleep note", nil, []string{"ops"}, "sync"); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "sleep summary",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "ops/sleep.md", Content: "# Sleep\n", Reason: "record"},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	if _, err := svc.SleepConsolidate(context.Background(), 1); err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+
+	logs, err := s.ListPredictionErrors(5)
+	if err != nil {
+		t.Fatalf("list prediction logs: %v", err)
+	}
+	found := false
+	for _, log := range logs {
+		if log.Source != "sleep" {
+			continue
+		}
+		if log.Metric == "kb_updates" {
+			found = true
+			if log.ActualValue != 1 {
+				t.Fatalf("expected actual kb updates=1, got %f", log.ActualValue)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected sleep kb_updates prediction log")
+	}
+}

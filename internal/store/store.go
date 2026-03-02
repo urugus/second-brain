@@ -58,6 +58,7 @@ func (s *Store) migrate() error {
 		migrateV3,
 		migrateV4,
 		migrateV5,
+		migrateV6,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -218,6 +219,28 @@ func migrateV5(tx *sql.Tx) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_memory_edges_from ON memory_edges(from_note_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_memory_edges_to ON memory_edges(to_note_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:40], err)
+		}
+	}
+	return nil
+}
+
+func migrateV6(tx *sql.Tx) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS prediction_error_log (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			source          TEXT NOT NULL,
+			metric          TEXT NOT NULL,
+			predicted_value REAL NOT NULL,
+			actual_value    REAL NOT NULL,
+			error_value     REAL NOT NULL,
+			priority_delta  INTEGER NOT NULL DEFAULT 0,
+			created_at      TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_prediction_error_source_time ON prediction_error_log(source, created_at DESC)`,
 	}
 	for _, stmt := range statements {
 		if _, err := tx.Exec(stmt); err != nil {

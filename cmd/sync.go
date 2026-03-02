@@ -38,6 +38,13 @@ and save important information to second-brain.`,
 		fmt.Printf("  Summary: %s\n", result.Summary)
 		fmt.Printf("  Notes added: %d\n", result.NotesAdded)
 		fmt.Printf("  Tasks added: %d\n", result.TasksAdded)
+		fmt.Printf("  Prediction error: notes %.2f -> %d (%+.2f), tasks %.2f -> %d (%+.2f)\n",
+			result.PredictedNotes, result.NotesAdded, result.NotesError,
+			result.PredictedTasks, result.TasksAdded, result.TasksError,
+		)
+		if result.PriorityDelta != 0 {
+			fmt.Printf("  Task priority adjusted: %+d (affected %d todo tasks)\n", result.PriorityDelta, result.AdjustedTasks)
+		}
 		if len(result.KBFilesUpdated) > 0 {
 			fmt.Printf("  KB files updated: %v\n", result.KBFilesUpdated)
 		}
