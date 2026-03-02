@@ -2,6 +2,102 @@
 
 作業セッション、タスク、メモ、長期的なナレッジを管理するパーソナルナレッジマネジメント CLI。Claude Code との連携用 MCP サーバーを内蔵。
 
+## アーキテクチャ
+
+### システム全体像
+
+```mermaid
+graph TB
+    subgraph Interface["インターフェース層"]
+        CLI["CLI (sb コマンド)"]
+        MCP["MCP Server (stdio)"]
+    end
+
+    subgraph Core["コアサービス"]
+        Session["セッション管理"]
+        TaskSvc["タスク管理"]
+        NoteSvc["メモ"]
+        Consolidation["統合エンジン"]
+        Sync["外部同期"]
+    end
+
+    subgraph Storage["ストレージ層"]
+        SQLite["SQLite DB<br/>(sessions, tasks, notes,<br/>events, memory_edges)"]
+        KB["ナレッジベース<br/>(Markdown ファイル)"]
+    end
+
+    subgraph External["外部連携"]
+        Claude["Claude API<br/>(claude CLI)"]
+    end
+
+    CLI --> Session & TaskSvc & NoteSvc & Consolidation & Sync
+    MCP -->|"Model Context Protocol"| Session & TaskSvc & NoteSvc & Consolidation
+
+    Session & TaskSvc & NoteSvc --> SQLite
+    Consolidation --> SQLite & KB & Claude
+    Sync --> SQLite & KB & Claude
+```
+
+### データフロー: キャプチャ → 統合 → ナレッジ
+
+```mermaid
+flowchart LR
+    subgraph Capture["1. ワーキングメモリ"]
+        S["セッション開始"]
+        T["タスク追加"]
+        N["メモ追加"]
+        E["セッション終了"]
+        S --> T & N --> E
+    end
+
+    subgraph Consolidate["2. 統合"]
+        Propose["提案<br/>(Claude がセッション<br/>データを分析)"]
+        Review["レビュー<br/>(diff プレビュー)"]
+        Apply["適用<br/>(KB ファイルに書込)"]
+        Propose --> Review --> Apply
+    end
+
+    subgraph LongTerm["3. 長期記憶"]
+        KBFiles["KB ファイル<br/>(topic/name.md)"]
+        Related["関連リンク<br/>(相互参照)"]
+        KBFiles --- Related
+    end
+
+    Capture -->|"sb consolidate"| Consolidate --> LongTerm
+```
+
+### Sync & 学習ループ
+
+```mermaid
+flowchart TB
+    Cron["Cron / 手動実行"] -->|"sb sync run"| Focus
+
+    subgraph Sync["同期パイプライン"]
+        Focus["フォーカスプロファイル構築<br/>(最近のメモ, アクティブタスク,<br/>トップタグ & 用語)"]
+        Agent["Claude Agent<br/>(外部ソースをチェック)"]
+        Result["結果を解析<br/>(新規メモ, タスク,<br/>KB 更新)"]
+        Focus --> Agent --> Result
+    end
+
+    subgraph Learn["予測学習"]
+        Predict["期待されるメモ/タスクを予測"]
+        Error["予測誤差を計算<br/>(実績 − 予測)"]
+        Adjust["タスク優先度を調整"]
+        Predict --> Error --> Adjust
+    end
+
+    subgraph Sleep["Sleep 統合"]
+        Check["未統合メモ<br/>> 閾値?"]
+        Dedup["メモの重複排除"]
+        Replay["重み付きリプレイ<br/>(salience × 0.6 + strength × 0.4)"]
+        Write["KB に書込"]
+        Check -->|Yes| Dedup --> Replay --> Write
+    end
+
+    Result --> Learn
+    Result --> Check
+```
+
 ## 機能
 
 - **セッション管理** — ゴールとサマリー付きの作業セッションを記録

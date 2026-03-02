@@ -4,6 +4,102 @@
 
 A personal knowledge management CLI that captures work sessions, tasks, notes, and long-term knowledge. Includes an MCP server for seamless Claude Code integration.
 
+## Architecture
+
+### System Overview
+
+```mermaid
+graph TB
+    subgraph Interface["Interface Layer"]
+        CLI["CLI (sb command)"]
+        MCP["MCP Server (stdio)"]
+    end
+
+    subgraph Core["Core Services"]
+        Session["Session Management"]
+        TaskSvc["Task Tracking"]
+        NoteSvc["Note Taking"]
+        Consolidation["Consolidation Engine"]
+        Sync["External Sync"]
+    end
+
+    subgraph Storage["Storage Layer"]
+        SQLite["SQLite DB<br/>(sessions, tasks, notes,<br/>events, memory_edges)"]
+        KB["Knowledge Base<br/>(Markdown files)"]
+    end
+
+    subgraph External["External"]
+        Claude["Claude API<br/>(claude CLI)"]
+    end
+
+    CLI --> Session & TaskSvc & NoteSvc & Consolidation & Sync
+    MCP -->|"Model Context Protocol"| Session & TaskSvc & NoteSvc & Consolidation
+
+    Session & TaskSvc & NoteSvc --> SQLite
+    Consolidation --> SQLite & KB & Claude
+    Sync --> SQLite & KB & Claude
+```
+
+### Data Flow: Capture → Consolidation → Knowledge
+
+```mermaid
+flowchart LR
+    subgraph Capture["1. Working Memory"]
+        S["Start Session"]
+        T["Add Tasks"]
+        N["Add Notes"]
+        E["End Session"]
+        S --> T & N --> E
+    end
+
+    subgraph Consolidate["2. Consolidation"]
+        Propose["Propose<br/>(Claude analyzes<br/>session data)"]
+        Review["Review<br/>(diff preview)"]
+        Apply["Apply<br/>(write KB files)"]
+        Propose --> Review --> Apply
+    end
+
+    subgraph LongTerm["3. Long-Term Memory"]
+        KBFiles["KB Files<br/>(topic/name.md)"]
+        Related["Related Links<br/>(cross-references)"]
+        KBFiles --- Related
+    end
+
+    Capture -->|"sb consolidate"| Consolidate --> LongTerm
+```
+
+### Sync & Learning Loop
+
+```mermaid
+flowchart TB
+    Cron["Cron / Manual Trigger"] -->|"sb sync run"| Focus
+
+    subgraph Sync["Sync Pipeline"]
+        Focus["Build Focus Profile<br/>(recent notes, active tasks,<br/>top tags & terms)"]
+        Agent["Claude Agent<br/>(check external sources)"]
+        Result["Parse Result<br/>(new notes, tasks,<br/>KB updates)"]
+        Focus --> Agent --> Result
+    end
+
+    subgraph Learn["Prediction Learning"]
+        Predict["Predict expected<br/>notes/tasks"]
+        Error["Compute prediction error<br/>(actual − predicted)"]
+        Adjust["Adjust task priorities"]
+        Predict --> Error --> Adjust
+    end
+
+    subgraph Sleep["Sleep Consolidation"]
+        Check["Unconsolidated notes<br/>> threshold?"]
+        Dedup["Deduplicate notes"]
+        Replay["Weighted replay<br/>(salience × 0.6 + strength × 0.4)"]
+        Write["Write to KB"]
+        Check -->|Yes| Dedup --> Replay --> Write
+    end
+
+    Result --> Learn
+    Result --> Check
+```
+
 ## Features
 
 - **Session Management** — Track focused work sessions with goals and summaries
