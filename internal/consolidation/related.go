@@ -34,9 +34,9 @@ func stripRelatedSection(content string) string {
 		}
 
 		if inRelated {
-			if strings.HasPrefix(trimmed, "## ") {
+			// Any markdown heading (#, ##, ###, etc.) ends the Related section
+			if strings.HasPrefix(trimmed, "#") {
 				inRelated = false
-				// Restore blank line before next heading
 				result = append(result, "")
 				result = append(result, line)
 			}

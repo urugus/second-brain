@@ -35,6 +35,16 @@ func TestStripRelatedSection(t *testing.T) {
 			input: "Just text.\n",
 			want:  "Just text.\n",
 		},
+		{
+			name:  "related section followed by h1 heading",
+			input: "# Title\n\n## Related\n- [Foo](foo.md)\n\n# Appendix\nAppendix content.\n",
+			want:  "# Title\n\n# Appendix\nAppendix content.\n",
+		},
+		{
+			name:  "related section followed by h3 heading",
+			input: "# Title\n\n## Related\n- [Foo](foo.md)\n\n### Notes\nSome notes.\n",
+			want:  "# Title\n\n### Notes\nSome notes.\n",
+		},
 	}
 
 	for _, tt := range tests {
