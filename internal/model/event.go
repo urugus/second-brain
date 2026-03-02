@@ -11,6 +11,7 @@ const (
 	EventTaskCreated       EventType = "task.created"
 	EventTaskStatusChanged EventType = "task.status_changed"
 	EventNoteAdded         EventType = "note.added"
+	EventConsolidated      EventType = "session.consolidated"
 )
 
 type Event struct {

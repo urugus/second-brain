@@ -109,3 +109,69 @@ func TestReadNonexistentFile(t *testing.T) {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
+
+func TestWrite(t *testing.T) {
+	dir := t.TempDir()
+	k := New(dir)
+
+	err := k.Write("test.md", "# Test\nContent here.\n")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	content, err := k.Read("test.md")
+	if err != nil {
+		t.Fatalf("read after write: %v", err)
+	}
+	if content != "# Test\nContent here.\n" {
+		t.Fatalf("unexpected content: %q", content)
+	}
+}
+
+func TestWriteNested(t *testing.T) {
+	dir := t.TempDir()
+	k := New(dir)
+
+	err := k.Write(filepath.Join("sub", "topic.md"), "# Topic\n")
+	if err != nil {
+		t.Fatalf("write nested: %v", err)
+	}
+
+	if !k.Exists(filepath.Join("sub", "topic.md")) {
+		t.Fatal("expected file to exist")
+	}
+}
+
+func TestWriteDirectoryTraversal(t *testing.T) {
+	dir := t.TempDir()
+	k := New(dir)
+
+	err := k.Write("../../evil.md", "bad content")
+	if err == nil {
+		t.Fatal("expected error for directory traversal in write")
+	}
+}
+
+func TestExists(t *testing.T) {
+	k := testKB(t)
+
+	if !k.Exists("golang-tips.md") {
+		t.Fatal("expected file to exist")
+	}
+	if k.Exists("nonexistent.md") {
+		t.Fatal("expected file to not exist")
+	}
+}
+
+func TestWriteOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	k := New(dir)
+
+	k.Write("doc.md", "v1")
+	k.Write("doc.md", "v2")
+
+	content, _ := k.Read("doc.md")
+	if content != "v2" {
+		t.Fatalf("expected v2, got %q", content)
+	}
+}

@@ -20,6 +20,16 @@ func (s *Store) appendEvent(tx *sql.Tx, sessionID *int64, eventType model.EventT
 	return nil
 }
 
+// RecordConsolidationEvent records a consolidation event outside a transaction.
+func (s *Store) RecordConsolidationEvent(sessionID int64, payload string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`INSERT INTO events (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)`,
+		sessionID, string(model.EventConsolidated), payload, now,
+	)
+	return err
+}
+
 func (s *Store) ListEventsBySession(sessionID int64) ([]model.Event, error) {
 	rows, err := s.db.Query(
 		`SELECT id, session_id, type, payload, created_at FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC`,

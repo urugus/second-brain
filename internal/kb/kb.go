@@ -47,9 +47,21 @@ func (k *KB) List() ([]string, error) {
 }
 
 func (k *KB) Read(relPath string) (string, error) {
+	absPath, err := k.checkPath(relPath)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	return string(data), nil
+}
+
+func (k *KB) checkPath(relPath string) (string, error) {
 	absPath := filepath.Join(k.rootDir, relPath)
 
-	// Prevent directory traversal
 	absPath, err := filepath.Abs(absPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
@@ -61,12 +73,28 @@ func (k *KB) Read(relPath string) (string, error) {
 	if !strings.HasPrefix(absPath, rootAbs+string(filepath.Separator)) && absPath != rootAbs {
 		return "", fmt.Errorf("path %q is outside knowledge base", relPath)
 	}
+	return absPath, nil
+}
 
-	data, err := os.ReadFile(absPath)
+func (k *KB) Write(relPath string, content string) error {
+	absPath, err := k.checkPath(relPath)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return err
 	}
-	return string(data), nil
+
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+	return os.WriteFile(absPath, []byte(content), 0o644)
+}
+
+func (k *KB) Exists(relPath string) bool {
+	absPath, err := k.checkPath(relPath)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(absPath)
+	return err == nil
 }
 
 func (k *KB) Search(query string) ([]SearchResult, error) {

@@ -1,20 +1,31 @@
 package adapter
 
-import "context"
+import (
+	"context"
+
+	"github.com/urugus/second-brain/internal/model"
+)
 
 // ConsolidationRequest contains the data an agent needs to perform consolidation.
 type ConsolidationRequest struct {
-	SessionID  int64
-	Notes      []string
-	Tasks      []string
-	Events     []string // JSON-encoded event payloads in chronological order
+	Session    *model.Session
+	Notes      []model.Note
+	Tasks      []model.Task
+	Events     []model.Event
 	ExistingKB []string // paths to relevant existing KB files
+}
+
+// KBUpdate represents a single knowledge base file update.
+type KBUpdate struct {
+	Path    string
+	Content string
+	Reason  string
 }
 
 // ConsolidationResult contains what the agent produced.
 type ConsolidationResult struct {
 	Summary        string
-	KBUpdates      map[string]string // filepath -> new markdown content
+	KBUpdates      []KBUpdate
 	SuggestedTasks []string
 }
 
