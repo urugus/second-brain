@@ -478,6 +478,38 @@ func TestSleepConsolidate_FiltersByPolicyScore(t *testing.T) {
 	}
 }
 
+func TestSleepConsolidate_SkipsWhenPolicySelectedBelowThreshold(t *testing.T) {
+	s, k := setupTest(t)
+	t.Setenv("SB_SLEEP_POLICY_SCORE_THRESHOLD", "0.28")
+
+	_, _ = s.CreateNote("high signal", nil, nil, "manual")
+	_, _ = s.CreateNote("low signal", nil, nil, "sync")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "should not run",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "policy/skip.md", Content: "# Skip\n", Reason: "test"},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	result, err := svc.SleepConsolidate(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result when selected notes are below threshold, got %+v", result)
+	}
+	if agent.lastReq.Mode != "" {
+		t.Fatal("agent should not be called when selected notes are below threshold")
+	}
+	if k.Exists("policy/skip.md") {
+		t.Fatal("KB should not be updated when sleep consolidation is skipped")
+	}
+}
+
 func TestApplyAppendsRelatedSection(t *testing.T) {
 	s, k := setupTest(t)
 

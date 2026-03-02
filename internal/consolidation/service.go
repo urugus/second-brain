@@ -170,6 +170,9 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	if len(policyResult.SelectedNotes) == 0 {
 		return nil, nil
 	}
+	if len(policyResult.SelectedNotes) < threshold {
+		return nil, nil
+	}
 	replayPlan := buildSleepReplayPlan(policyResult.SelectedNotes, runtimeCfg.SleepDuplicateReplayWeight, runtimeCfg.SleepReplayEnabled)
 	if len(replayPlan.replayNotes) == 0 {
 		return nil, nil
