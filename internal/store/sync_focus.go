@@ -45,10 +45,17 @@ func (s *Store) ListActiveTasksForSyncFocus(limit int) ([]model.Task, error) {
 		`SELECT id, session_id, title, description, status, priority, created_at, updated_at
 		 FROM tasks
 		 WHERE status IN (?, ?)
-		 ORDER BY priority DESC, id DESC
+		 ORDER BY
+		   CASE status
+		     WHEN ? THEN 0
+		     ELSE 1
+		   END ASC,
+		   priority DESC,
+		   id DESC
 		 LIMIT ?`,
 		string(model.TaskInProgress),
 		string(model.TaskTodo),
+		string(model.TaskInProgress),
 		limit,
 	)
 	if err != nil {
