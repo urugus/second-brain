@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/urugus/second-brain/internal/config"
 	"github.com/urugus/second-brain/internal/model"
 )
 
 const (
 	defaultPredictionWindow = 5
-	maxTaskPriority         = 5
 )
 
 func (s *Store) EstimateSyncPrediction(limit int) (predictedNotes float64, predictedTasks float64, err error) {
@@ -81,6 +81,7 @@ func (s *Store) AdjustTodoTaskPriorities(delta int, limit int) (int, error) {
 	if delta == 0 || limit <= 0 {
 		return 0, nil
 	}
+	maxTaskPriority := config.LoadRuntime().TaskPriorityMax
 
 	tx, err := s.db.Begin()
 	if err != nil {

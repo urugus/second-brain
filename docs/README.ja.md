@@ -105,6 +105,7 @@ sb consolidate --model claude-sonnet-4-5-20250514  # モデル指定
 | `sync disable` | 自動同期を無効化 | |
 | `sync status` | 同期ステータスを表示 | |
 | `sync log` | 同期履歴を表示 | `--limit` (デフォルト: 10) |
+| `sync metrics` | 運用 KPI を表示 | `--days` (デフォルト: 14) |
 
 ### その他
 
@@ -119,6 +120,25 @@ sb consolidate --model claude-sonnet-4-5-20250514  # モデル指定
 |-------|----------|------|
 | `--db` | `~/.second-brain/brain.db` | SQLite データベースパス |
 | `--kb-dir` | `~/.second-brain/knowledge` | ナレッジベースディレクトリ |
+
+## 実行時パラメータ
+
+環境変数でチューニング可能:
+
+- `SB_SLEEP_THRESHOLD`
+- `SB_SYNC_PREDICTION_WINDOW`
+- `SB_PRIORITY_ADJUST_LIMIT`
+- `SB_TASK_PRIORITY_MAX`
+- `SB_SLEEP_REPLAY_ALPHA`
+- `SB_SLEEP_DUPLICATE_REPLAY_WEIGHT`
+- `SB_METRICS_WINDOW_DAYS`
+
+ロールバック用 Feature Flag:
+
+- `SB_FEATURE_PREDICTION_LEARNING=0|1`
+- `SB_FEATURE_SLEEP_REPLAY=0|1`
+
+詳細: [Phase 5 運用プレイブック](phase5-operations-playbook.ja.md)
 
 ## MCP サーバー
 

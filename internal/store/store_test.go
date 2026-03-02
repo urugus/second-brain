@@ -13,6 +13,16 @@ import (
 
 func setupTestStore(t *testing.T) *Store {
 	t.Helper()
+	t.Setenv("SB_FEATURE_PREDICTION_LEARNING", "1")
+	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "1")
+	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "0.18")
+	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "0.35")
+	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
+	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
+	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
+	t.Setenv("SB_SLEEP_THRESHOLD", "10")
+	t.Setenv("SB_METRICS_WINDOW_DAYS", "14")
+
 	dir := t.TempDir()
 	s, err := Open(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -414,6 +424,65 @@ func TestAdjustTodoTaskPriorities(t *testing.T) {
 	}
 	if afterDone.Priority != 3 {
 		t.Fatalf("expected done task to remain 3, got %d", afterDone.Priority)
+	}
+}
+
+func TestComputeOperationalMetrics(t *testing.T) {
+	s := setupTestStore(t)
+
+	// Notes: 3 total, 1 duplicate (same normalized content)
+	if _, err := s.CreateNote("repeat me", nil, nil, "manual"); err != nil {
+		t.Fatalf("create note 1: %v", err)
+	}
+	if _, err := s.CreateNote("  Repeat Me  ", nil, nil, "sync"); err != nil {
+		t.Fatalf("create note 2: %v", err)
+	}
+	if _, err := s.CreateNote("unique note", nil, nil, "sync"); err != nil {
+		t.Fatalf("create note 3: %v", err)
+	}
+
+	// Tasks: 2 total, 1 done.
+	taskDone, _ := s.CreateTask("done", "", nil, 1)
+	taskTodo, _ := s.CreateTask("todo", "", nil, 1)
+	if err := s.UpdateTaskStatus(taskDone.ID, model.TaskDone); err != nil {
+		t.Fatalf("set task done: %v", err)
+	}
+	if err := s.UpdateTaskStatus(taskTodo.ID, model.TaskTodo); err != nil {
+		t.Fatalf("set task todo: %v", err)
+	}
+
+	// KB updates: a.md updated twice, b.md once.
+	syncLog, _ := s.CreateSyncLog("agent", "prompt")
+	if err := s.UpdateSyncLog(syncLog.ID, model.SyncCompleted, "", 0, 0, "a.md,b.md", 0, ""); err != nil {
+		t.Fatalf("update sync log: %v", err)
+	}
+	conLog, _ := s.CreateSleepConsolidationLog("agent")
+	if err := s.UpdateConsolidationLog(conLog.ID, model.ConsolidationCompleted, "", "a.md"); err != nil {
+		t.Fatalf("update consolidation log: %v", err)
+	}
+
+	metrics, err := s.ComputeOperationalMetrics(14)
+	if err != nil {
+		t.Fatalf("compute metrics: %v", err)
+	}
+
+	if metrics.NotesTotal != 3 || metrics.DuplicateNotes != 1 {
+		t.Fatalf("unexpected note metrics: %+v", metrics)
+	}
+	if !almostEqual(metrics.DuplicateNoteRate, 1.0/3.0) {
+		t.Fatalf("unexpected duplicate note rate: %f", metrics.DuplicateNoteRate)
+	}
+	if metrics.TasksTotal != 2 || metrics.TasksDone != 1 {
+		t.Fatalf("unexpected task metrics: %+v", metrics)
+	}
+	if !almostEqual(metrics.UsefulTaskGenerationRate, 0.5) {
+		t.Fatalf("unexpected useful task rate: %f", metrics.UsefulTaskGenerationRate)
+	}
+	if metrics.UniqueKBFilesUpdated != 2 || metrics.ReworkedKBFiles != 1 {
+		t.Fatalf("unexpected KB metrics: %+v", metrics)
+	}
+	if !almostEqual(metrics.KBReworkRate, 0.5) {
+		t.Fatalf("unexpected kb rework rate: %f", metrics.KBReworkRate)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urugus/second-brain/internal/config"
 	"github.com/urugus/second-brain/internal/model"
 )
 
@@ -21,7 +22,6 @@ const (
 	defaultDecayRate = 0.015
 	recallAlpha      = 0.25
 	minStrength      = 0.05
-	sleepReplayAlpha = 0.18
 )
 
 func (s *Store) CreateNote(content string, sessionID *int64, tags []string, source string) (*model.Note, error) {
@@ -152,6 +152,7 @@ func (s *Store) ApplySleepReplayConsolidation(replayWeightByNoteID map[int64]flo
 	if len(replayWeightByNoteID) == 0 {
 		return nil
 	}
+	replayAlpha := config.LoadRuntime().SleepReplayAlpha
 
 	now = now.UTC()
 	nowStr := now.Format(time.RFC3339)
@@ -177,7 +178,7 @@ func (s *Store) ApplySleepReplayConsolidation(replayWeightByNoteID map[int64]flo
 			return fmt.Errorf("get note %d: %w", noteID, err)
 		}
 
-		delta := sleepReplayAlpha * replayWeight * salience * (1 - strength)
+		delta := replayAlpha * replayWeight * salience * (1 - strength)
 		newStrength := clamp(strength+delta, 0, 1)
 
 		if _, err := tx.Exec(

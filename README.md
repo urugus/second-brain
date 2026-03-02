@@ -107,6 +107,7 @@ sb consolidate --model claude-sonnet-4-5-20250514  # Specify model
 | `sync disable` | Disable automatic sync | |
 | `sync status` | Show sync status | |
 | `sync log` | Show sync history | `--limit` (default: 10) |
+| `sync metrics` | Show operational KPIs | `--days` (default: 14) |
 
 ### Other
 
@@ -121,6 +122,25 @@ sb consolidate --model claude-sonnet-4-5-20250514  # Specify model
 |------|---------|-------------|
 | `--db` | `~/.second-brain/brain.db` | SQLite database path |
 | `--kb-dir` | `~/.second-brain/knowledge` | Knowledge base directory |
+
+## Runtime Parameters
+
+Tune behavior with environment variables:
+
+- `SB_SLEEP_THRESHOLD`
+- `SB_SYNC_PREDICTION_WINDOW`
+- `SB_PRIORITY_ADJUST_LIMIT`
+- `SB_TASK_PRIORITY_MAX`
+- `SB_SLEEP_REPLAY_ALPHA`
+- `SB_SLEEP_DUPLICATE_REPLAY_WEIGHT`
+- `SB_METRICS_WINDOW_DAYS`
+
+Feature flags for rollback:
+
+- `SB_FEATURE_PREDICTION_LEARNING=0|1`
+- `SB_FEATURE_SLEEP_REPLAY=0|1`
+
+Details: [Phase 5 operations playbook](docs/phase5-operations-playbook.ja.md)
 
 ## MCP Server
 

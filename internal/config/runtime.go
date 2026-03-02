@@ -1,0 +1,84 @@
+package config
+
+import (
+	"os"
+	"strconv"
+	"strings"
+)
+
+type Runtime struct {
+	SleepThreshold             int
+	SyncPredictionWindow       int
+	PriorityAdjustLimit        int
+	SleepReplayAlpha           float64
+	SleepDuplicateReplayWeight float64
+	TaskPriorityMax            int
+	PredictionLearningEnabled  bool
+	SleepReplayEnabled         bool
+	MetricsWindowDays          int
+}
+
+func LoadRuntime() Runtime {
+	return Runtime{
+		SleepThreshold:             getInt("SB_SLEEP_THRESHOLD", 10, 1, 10_000),
+		SyncPredictionWindow:       getInt("SB_SYNC_PREDICTION_WINDOW", 5, 1, 100),
+		PriorityAdjustLimit:        getInt("SB_PRIORITY_ADJUST_LIMIT", 5, 1, 100),
+		SleepReplayAlpha:           getFloat("SB_SLEEP_REPLAY_ALPHA", 0.18, 0.0, 1.0),
+		SleepDuplicateReplayWeight: getFloat("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", 0.35, 0.0, 1.0),
+		TaskPriorityMax:            getInt("SB_TASK_PRIORITY_MAX", 5, 1, 100),
+		PredictionLearningEnabled:  getBool("SB_FEATURE_PREDICTION_LEARNING", true),
+		SleepReplayEnabled:         getBool("SB_FEATURE_SLEEP_REPLAY", true),
+		MetricsWindowDays:          getInt("SB_METRICS_WINDOW_DAYS", 14, 1, 365),
+	}
+}
+
+func getInt(name string, def int, minV int, maxV int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func getFloat(name string, def float64, minV float64, maxV float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return def
+	}
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func getBool(name string, def bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if raw == "" {
+		return def
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
+}
