@@ -35,6 +35,10 @@ func setupTest(t *testing.T) (*store.Store, *kb.KB) {
 	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "1")
 	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "0.18")
 	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "0.35")
+	t.Setenv("SB_SLEEP_POLICY_SCORE_THRESHOLD", "0.20")
+	t.Setenv("SB_SLEEP_POLICY_RECURRENCE_WEIGHT", "0.35")
+	t.Setenv("SB_SLEEP_POLICY_UTILITY_WEIGHT", "0.55")
+	t.Setenv("SB_SLEEP_POLICY_STALENESS_WEIGHT", "0.25")
 
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -424,6 +428,85 @@ func TestSleepConsolidate_SleepReplayDisabled(t *testing.T) {
 	}
 	if !almostEqual(before[n2.ID], after2.Strength) {
 		t.Fatalf("strength should remain unchanged when replay disabled: before=%f after=%f", before[n2.ID], after2.Strength)
+	}
+}
+
+func TestSleepConsolidate_FiltersByPolicyScore(t *testing.T) {
+	s, k := setupTest(t)
+	t.Setenv("SB_SLEEP_POLICY_SCORE_THRESHOLD", "0.28")
+
+	highSignal, _ := s.CreateNote("high signal", nil, nil, "manual")
+	lowSignal, _ := s.CreateNote("low signal", nil, nil, "sync")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "policy filter test",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "policy/filter.md", Content: "# Policy\n", Reason: "test"},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	result, err := svc.SleepConsolidate(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected sleep result")
+	}
+	if result.PolicyCandidates != 2 {
+		t.Fatalf("expected 2 policy candidates, got %d", result.PolicyCandidates)
+	}
+	if result.PolicySelected != 1 {
+		t.Fatalf("expected 1 policy-selected note, got %d", result.PolicySelected)
+	}
+	if len(agent.lastReq.Notes) != 1 {
+		t.Fatalf("expected 1 note passed to sleep agent, got %d", len(agent.lastReq.Notes))
+	}
+	if agent.lastReq.Notes[0].ID != highSignal.ID {
+		t.Fatalf("expected high-signal note #%d to be selected, got #%d", highSignal.ID, agent.lastReq.Notes[0].ID)
+	}
+
+	afterHigh, _ := s.GetNote(highSignal.ID)
+	afterLow, _ := s.GetNote(lowSignal.ID)
+	if afterHigh.ConsolidatedAt == nil {
+		t.Fatalf("high-signal note %d should be consolidated", highSignal.ID)
+	}
+	if afterLow.ConsolidatedAt != nil {
+		t.Fatalf("low-signal note %d should remain unconsolidated", lowSignal.ID)
+	}
+}
+
+func TestSleepConsolidate_SkipsWhenPolicySelectedBelowThreshold(t *testing.T) {
+	s, k := setupTest(t)
+	t.Setenv("SB_SLEEP_POLICY_SCORE_THRESHOLD", "0.28")
+
+	_, _ = s.CreateNote("high signal", nil, nil, "manual")
+	_, _ = s.CreateNote("low signal", nil, nil, "sync")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "should not run",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "policy/skip.md", Content: "# Skip\n", Reason: "test"},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	result, err := svc.SleepConsolidate(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result when selected notes are below threshold, got %+v", result)
+	}
+	if agent.lastReq.Mode != "" {
+		t.Fatal("agent should not be called when selected notes are below threshold")
+	}
+	if k.Exists("policy/skip.md") {
+		t.Fatal("KB should not be updated when sleep consolidation is skipped")
 	}
 }
 

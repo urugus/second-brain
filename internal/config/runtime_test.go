@@ -4,6 +4,10 @@ import "testing"
 
 func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_SLEEP_THRESHOLD", "")
+	t.Setenv("SB_SLEEP_POLICY_SCORE_THRESHOLD", "")
+	t.Setenv("SB_SLEEP_POLICY_RECURRENCE_WEIGHT", "")
+	t.Setenv("SB_SLEEP_POLICY_UTILITY_WEIGHT", "")
+	t.Setenv("SB_SLEEP_POLICY_STALENESS_WEIGHT", "")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "")
 	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "")
@@ -21,6 +25,18 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	cfg := LoadRuntime()
 	if cfg.SleepThreshold != 10 {
 		t.Fatalf("unexpected default sleep threshold: %d", cfg.SleepThreshold)
+	}
+	if cfg.SleepPolicyScoreThreshold != 0.20 {
+		t.Fatalf("unexpected default sleep policy score threshold: %f", cfg.SleepPolicyScoreThreshold)
+	}
+	if cfg.SleepPolicyRecurrenceW != 0.35 {
+		t.Fatalf("unexpected default sleep policy recurrence weight: %f", cfg.SleepPolicyRecurrenceW)
+	}
+	if cfg.SleepPolicyUtilityW != 0.55 {
+		t.Fatalf("unexpected default sleep policy utility weight: %f", cfg.SleepPolicyUtilityW)
+	}
+	if cfg.SleepPolicyStalenessW != 0.25 {
+		t.Fatalf("unexpected default sleep policy staleness weight: %f", cfg.SleepPolicyStalenessW)
 	}
 	if cfg.SyncPredictionWindow != 5 {
 		t.Fatalf("unexpected default prediction window: %d", cfg.SyncPredictionWindow)
@@ -65,6 +81,10 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 
 func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_SLEEP_THRESHOLD", "25")
+	t.Setenv("SB_SLEEP_POLICY_SCORE_THRESHOLD", "0.42")
+	t.Setenv("SB_SLEEP_POLICY_RECURRENCE_WEIGHT", "0.30")
+	t.Setenv("SB_SLEEP_POLICY_UTILITY_WEIGHT", "0.60")
+	t.Setenv("SB_SLEEP_POLICY_STALENESS_WEIGHT", "0.20")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "9")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "3")
 	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "0.2")
@@ -81,6 +101,10 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 
 	cfg := LoadRuntime()
 	if cfg.SleepThreshold != 25 ||
+		cfg.SleepPolicyScoreThreshold != 0.42 ||
+		cfg.SleepPolicyRecurrenceW != 0.30 ||
+		cfg.SleepPolicyUtilityW != 0.60 ||
+		cfg.SleepPolicyStalenessW != 0.20 ||
 		cfg.SyncPredictionWindow != 9 ||
 		cfg.PriorityAdjustLimit != 3 ||
 		cfg.SleepReplayAlpha != 0.2 ||

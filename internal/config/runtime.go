@@ -8,6 +8,10 @@ import (
 
 type Runtime struct {
 	SleepThreshold             int
+	SleepPolicyScoreThreshold  float64
+	SleepPolicyRecurrenceW     float64
+	SleepPolicyUtilityW        float64
+	SleepPolicyStalenessW      float64
 	SyncPredictionWindow       int
 	PriorityAdjustLimit        int
 	SleepReplayAlpha           float64
@@ -26,6 +30,10 @@ type Runtime struct {
 func LoadRuntime() Runtime {
 	return Runtime{
 		SleepThreshold:             getInt("SB_SLEEP_THRESHOLD", 10, 1, 10_000),
+		SleepPolicyScoreThreshold:  getFloat("SB_SLEEP_POLICY_SCORE_THRESHOLD", 0.20, 0.0, 1.0),
+		SleepPolicyRecurrenceW:     getFloat("SB_SLEEP_POLICY_RECURRENCE_WEIGHT", 0.35, 0.0, 1.0),
+		SleepPolicyUtilityW:        getFloat("SB_SLEEP_POLICY_UTILITY_WEIGHT", 0.55, 0.0, 1.0),
+		SleepPolicyStalenessW:      getFloat("SB_SLEEP_POLICY_STALENESS_WEIGHT", 0.25, 0.0, 1.0),
 		SyncPredictionWindow:       getInt("SB_SYNC_PREDICTION_WINDOW", 5, 1, 100),
 		PriorityAdjustLimit:        getInt("SB_PRIORITY_ADJUST_LIMIT", 5, 1, 100),
 		SleepReplayAlpha:           getFloat("SB_SLEEP_REPLAY_ALPHA", 0.18, 0.0, 1.0),
