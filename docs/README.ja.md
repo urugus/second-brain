@@ -10,6 +10,7 @@
 - **ナレッジベース** — トピック別に整理された永続的な Markdown ファイル
 - **セッション統合** — AI によるセッション知識の KB への抽出
 - **外部同期** — 外部ソースからの定期的な情報収集
+  （保存済みノート/タスクから学習して関連性を優先）
 - **MCP サーバー** — Model Context Protocol で全機能を Claude Code に公開
 
 ## インストール
@@ -132,11 +133,16 @@ sb consolidate --model claude-sonnet-4-5-20250514  # モデル指定
 - `SB_SLEEP_REPLAY_ALPHA`
 - `SB_SLEEP_DUPLICATE_REPLAY_WEIGHT`
 - `SB_METRICS_WINDOW_DAYS`
+- `SB_SYNC_FOCUS_NOTES_LIMIT`
+- `SB_SYNC_FOCUS_TASKS_LIMIT`
+- `SB_SYNC_FOCUS_TAGS_MAX`
+- `SB_SYNC_FOCUS_TERMS_MAX`
 
 ロールバック用 Feature Flag:
 
 - `SB_FEATURE_PREDICTION_LEARNING=0|1`
 - `SB_FEATURE_SLEEP_REPLAY=0|1`
+- `SB_FEATURE_SYNC_FOCUS_LEARNING=0|1`
 
 詳細: [Phase 5 運用プレイブック](phase5-operations-playbook.ja.md)
 

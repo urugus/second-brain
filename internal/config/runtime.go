@@ -13,8 +13,13 @@ type Runtime struct {
 	SleepReplayAlpha           float64
 	SleepDuplicateReplayWeight float64
 	TaskPriorityMax            int
+	SyncFocusNotesLimit        int
+	SyncFocusTasksLimit        int
+	SyncFocusTagsMax           int
+	SyncFocusTermsMax          int
 	PredictionLearningEnabled  bool
 	SleepReplayEnabled         bool
+	SyncFocusLearningEnabled   bool
 	MetricsWindowDays          int
 }
 
@@ -26,8 +31,13 @@ func LoadRuntime() Runtime {
 		SleepReplayAlpha:           getFloat("SB_SLEEP_REPLAY_ALPHA", 0.18, 0.0, 1.0),
 		SleepDuplicateReplayWeight: getFloat("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", 0.35, 0.0, 1.0),
 		TaskPriorityMax:            getInt("SB_TASK_PRIORITY_MAX", 5, 1, 100),
+		SyncFocusNotesLimit:        getInt("SB_SYNC_FOCUS_NOTES_LIMIT", 250, 10, 5000),
+		SyncFocusTasksLimit:        getInt("SB_SYNC_FOCUS_TASKS_LIMIT", 120, 5, 2000),
+		SyncFocusTagsMax:           getInt("SB_SYNC_FOCUS_TAGS_MAX", 8, 1, 50),
+		SyncFocusTermsMax:          getInt("SB_SYNC_FOCUS_TERMS_MAX", 12, 1, 100),
 		PredictionLearningEnabled:  getBool("SB_FEATURE_PREDICTION_LEARNING", true),
 		SleepReplayEnabled:         getBool("SB_FEATURE_SLEEP_REPLAY", true),
+		SyncFocusLearningEnabled:   getBool("SB_FEATURE_SYNC_FOCUS_LEARNING", true),
 		MetricsWindowDays:          getInt("SB_METRICS_WINDOW_DAYS", 14, 1, 365),
 	}
 }

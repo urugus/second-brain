@@ -1,25 +1,60 @@
 package sync
 
-const defaultSyncPrompt = `You are a sync agent for a personal "Second Brain" knowledge management system.
+import (
+	"fmt"
+	"strings"
+)
+
+func buildSyncPrompt(profile *focusProfile) string {
+	var b strings.Builder
+	b.WriteString(`You are a sync agent for a personal "Second Brain" knowledge management system.
 Your job is to collect important information from all available sources and save what is worth keeping.
 
 ## Instructions
 
-1. **Discover available tools**: Check all MCP tools available to you. Use every
-   tool that can provide useful information -- do not limit yourself to specific
-   services. Gather as much relevant information as possible from all sources.
+1. **Discover available tools**: Check all MCP tools available to you.
+   Use broad source coverage, but do NOT process every message equally.
+   Prioritize likely user-relevant information first.
 
-2. **Check existing second-brain data** to avoid duplicates:
+2. **Apply relevance ranking while collecting**:
+   - Focus first on items tied to the user's active projects, tasks, and recurring topics
+   - In high-volume sources (for example, Slack), prioritize channels/threads/messages
+     that match the learned relevance profile below
+   - De-prioritize repetitive chatter, broad announcements, and low-signal noise
+`)
+	if profile != nil && !profile.isEmpty() {
+		fmt.Fprintf(&b, `
+## Learned relevance profile (adaptive)
+This profile is inferred from previously saved notes and tasks.
+Treat it as ranking guidance (soft preference), not a strict filter.
+
+- Priority tags: %s
+- Priority keywords: %s
+- Active task keywords: %s
+`,
+			commaOrNone(profile.Tags),
+			commaOrNone(profile.Terms),
+			commaOrNone(profile.TaskTerms),
+		)
+	} else {
+		b.WriteString(`
+## Learned relevance profile (adaptive)
+No stable profile yet. Start broad, then let saved notes/tasks define future focus.
+`)
+	}
+
+	b.WriteString(`
+3. **Check existing second-brain data** to avoid duplicates:
    - Use list_notes to see recent notes
    - Use list_tasks to see current tasks
    - Use kb_list and kb_search to check existing knowledge
 
-3. **Save what matters** using second-brain MCP tools:
+4. **Save what matters** using second-brain MCP tools:
    - Use create_note for important information (include tags and source)
    - Use create_task for actionable items (include description and priority)
    - Use kb_write to update knowledge base files if information has changed
 
-4. **Guidelines**:
+5. **Guidelines**:
    - Only save genuinely important or actionable information
    - Do NOT save trivial messages, routine status updates, or noise
    - Tag notes with their source (e.g. the tool or service name)
@@ -27,7 +62,17 @@ Your job is to collect important information from all available sources and save
    - Merge new information into existing KB files when the topic already exists
    - If nothing important is found, that is fine -- report an empty sync
 
-5. **Return a summary** of what you did.`
+6. **Return a summary** of what you did.`)
+
+	return b.String()
+}
+
+func commaOrNone(values []string) string {
+	if len(values) == 0 {
+		return "(none)"
+	}
+	return strings.Join(values, ", ")
+}
 
 const syncJSONSchema = `{
   "type": "object",
