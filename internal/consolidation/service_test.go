@@ -3,6 +3,7 @@ package consolidation
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urugus/second-brain/internal/adapter"
@@ -12,13 +13,15 @@ import (
 
 // mockAgent implements adapter.Agent for testing.
 type mockAgent struct {
-	result *adapter.ConsolidationResult
-	err    error
+	result  *adapter.ConsolidationResult
+	err     error
+	lastReq adapter.ConsolidationRequest
 }
 
 func (m *mockAgent) Name() string { return "mock" }
 
 func (m *mockAgent) Consolidate(ctx context.Context, req adapter.ConsolidationRequest) (*adapter.ConsolidationResult, error) {
+	m.lastReq = req
 	return m.result, m.err
 }
 
@@ -190,5 +193,141 @@ func TestProposeExistingFile(t *testing.T) {
 	}
 	if proposed.KBUpdates[0].OldContent != "# Old Content\n" {
 		t.Errorf("unexpected old content: %q", proposed.KBUpdates[0].OldContent)
+	}
+}
+
+func TestSleepConsolidate_ReplayDedupAndStrengthUpdate(t *testing.T) {
+	s, k := setupTest(t)
+
+	n1, _ := s.CreateNote("Go interfaces for abstraction", nil, []string{"go"}, "manual")
+	n2, _ := s.CreateNote("  go interfaces for abstraction ", nil, []string{"go", "design"}, "sync")
+	n3, _ := s.CreateNote("Use table-driven tests for parsers", nil, []string{"testing"}, "manual")
+
+	beforeStrength := map[int64]float64{
+		n1.ID: n1.Strength,
+		n2.ID: n2.Strength,
+		n3.ID: n3.Strength,
+	}
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Sleep consolidation completed.",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "golang/interfaces.md", Content: "# Interfaces v1\n", Reason: "initial"},
+				{Path: "golang/interfaces.md", Content: "# Interfaces v2\n", Reason: "deduped latest"},
+				{Path: "testing/table-driven.md", Content: "# Table Driven\n", Reason: "testing"},
+			},
+			SuggestedTasks: []string{
+				"Review interface boundaries",
+				"Review interface boundaries",
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	result, err := svc.SleepConsolidate(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected sleep result")
+	}
+
+	if result.NotesProcessed != 3 {
+		t.Fatalf("expected 3 processed notes, got %d", result.NotesProcessed)
+	}
+	if result.NotesReplayed != 2 {
+		t.Fatalf("expected 2 replayed notes after dedupe, got %d", result.NotesReplayed)
+	}
+	if result.DuplicatesMerged != 1 {
+		t.Fatalf("expected 1 merged duplicate, got %d", result.DuplicatesMerged)
+	}
+
+	if agent.lastReq.Mode != "sleep" {
+		t.Fatalf("expected sleep mode request, got %q", agent.lastReq.Mode)
+	}
+	if len(agent.lastReq.Notes) != 2 {
+		t.Fatalf("expected deduped replay notes length 2, got %d", len(agent.lastReq.Notes))
+	}
+	seen := map[string]struct{}{}
+	for _, note := range agent.lastReq.Notes {
+		key := normalizeNoteContent(note.Content)
+		if _, ok := seen[key]; ok {
+			t.Fatalf("duplicate replay note key found: %q", key)
+		}
+		seen[key] = struct{}{}
+	}
+
+	content, err := k.Read("golang/interfaces.md")
+	if err != nil {
+		t.Fatalf("read deduped KB file: %v", err)
+	}
+	if content != "# Interfaces v2\n" {
+		t.Fatalf("expected latest duplicate KB update to win, got %q", content)
+	}
+	if len(result.KBFilesUpdated) != 2 {
+		t.Fatalf("expected 2 unique KB files updated, got %d", len(result.KBFilesUpdated))
+	}
+
+	tasks, _ := s.ListTasks(store.TaskFilter{})
+	count := 0
+	for _, task := range tasks {
+		if task.Title == "Review interface boundaries" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected deduped suggested task count 1, got %d", count)
+	}
+
+	afterNotes, err := s.ListNotes(store.NoteFilter{})
+	if err != nil {
+		t.Fatalf("list notes: %v", err)
+	}
+	for _, note := range afterNotes {
+		before, ok := beforeStrength[note.ID]
+		if !ok {
+			continue
+		}
+		if note.ConsolidatedAt == nil {
+			t.Fatalf("note %d should be consolidated", note.ID)
+		}
+		if note.Strength <= before {
+			t.Fatalf("note %d strength should increase (before=%.4f after=%.4f)", note.ID, before, note.Strength)
+		}
+	}
+}
+
+func TestSleepConsolidate_AllKBWritesFail(t *testing.T) {
+	s, k := setupTest(t)
+
+	note, _ := s.CreateNote("important note", nil, []string{"sync"}, "sync")
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "Should fail write",
+			KBUpdates: []adapter.KBUpdate{
+				{Path: "../outside.md", Content: "x", Reason: "invalid path"},
+			},
+		},
+	}
+	svc := NewService(s, k, agent)
+
+	result, err := svc.SleepConsolidate(context.Background(), 1)
+	if err == nil {
+		t.Fatal("expected error when all KB writes fail")
+	}
+	if result != nil {
+		t.Fatal("expected nil result on total KB write failure")
+	}
+	if !strings.Contains(err.Error(), "all KB writes failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	after, err := s.GetNote(note.ID)
+	if err != nil {
+		t.Fatalf("get note: %v", err)
+	}
+	if after.ConsolidatedAt != nil {
+		t.Fatalf("note %d should remain unconsolidated on failure", note.ID)
 	}
 }

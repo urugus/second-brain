@@ -140,20 +140,24 @@ the long-term knowledge base.
 You will receive a list of unconsolidated notes and existing knowledge base files.
 
 Your job:
-1. Produce a concise summary of what themes and information the notes contain.
-2. Identify knowledge worth preserving long-term and produce KB file updates.
+1. Replay and abstract the note set:
+   - Group near-duplicate notes into one abstracted point.
+   - Preserve only differences that add meaningful knowledge.
+2. Produce a concise summary of what themes and information the notes contain.
+3. Identify knowledge worth preserving long-term and produce KB file updates.
    - For existing files: return the complete updated content (not a diff).
    - For new topics: create new files with descriptive filenames.
    - File paths should use lowercase-kebab-case with .md extension.
    - Organize into subdirectories by topic if appropriate.
    - Write in clear, concise Markdown.
-3. Suggest actionable follow-up tasks if any notes imply action is needed.
+4. Suggest actionable follow-up tasks if any notes imply action is needed.
 
 Guidelines:
 - Only create/update KB files for genuinely useful long-term knowledge.
 - Do NOT create entries for trivial or ephemeral information.
 - Merge new information into existing files when the topic already exists.
 - Group related notes together when updating/creating KB files.
+- Avoid duplicate KB updates for the same path; return at most one final update per path.
 - If there is nothing worth persisting, return empty kb_updates.
 - Notes may come from different time periods -- focus on content, not chronology.`
 

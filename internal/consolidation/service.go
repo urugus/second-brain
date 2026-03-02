@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/urugus/second-brain/internal/adapter"
 	"github.com/urugus/second-brain/internal/kb"
@@ -130,11 +132,13 @@ func (s *Service) Propose(ctx context.Context, sessionID int64) (*ProposedChange
 
 // SleepResult holds the outcome of a sleep-mode consolidation.
 type SleepResult struct {
-	LogID          int64
-	NotesProcessed int
-	Summary        string
-	KBFilesUpdated []string
-	TasksCreated   int
+	LogID            int64
+	NotesProcessed   int
+	NotesReplayed    int
+	DuplicatesMerged int
+	Summary          string
+	KBFilesUpdated   []string
+	TasksCreated     int
 }
 
 // SleepConsolidate runs autonomous consolidation on unconsolidated notes.
@@ -155,6 +159,10 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	if len(notes) == 0 {
 		return nil, nil
 	}
+	replayPlan := buildSleepReplayPlan(notes)
+	if len(replayPlan.replayNotes) == 0 {
+		return nil, nil
+	}
 
 	cl, err := s.store.CreateSleepConsolidationLog(s.agent.Name())
 	if err != nil {
@@ -170,7 +178,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 
 	req := adapter.ConsolidationRequest{
 		Mode:       "sleep",
-		Notes:      notes,
+		Notes:      replayPlan.replayNotes,
 		ExistingKB: kbFiles,
 	}
 
@@ -179,10 +187,11 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, fmt.Sprintf("agent error: %v", err), "")
 		return nil, fmt.Errorf("agent consolidation: %w", err)
 	}
+	dedupedKBUpdates := dedupeKBUpdatesByPath(result.KBUpdates)
 
 	var appliedFiles []string
 	var writeErrors []string
-	for _, u := range result.KBUpdates {
+	for _, u := range dedupedKBUpdates {
 		if err := s.kb.Write(u.Path, u.Content); err != nil {
 			writeErrors = append(writeErrors, fmt.Sprintf("%s: %v", u.Path, err))
 			continue
@@ -196,15 +205,18 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		return nil, fmt.Errorf("%s", errMsg)
 	}
 
-	for _, taskTitle := range result.SuggestedTasks {
-		s.store.CreateTask(taskTitle, "", nil, 0)
+	tasksCreated := 0
+	for _, taskTitle := range dedupeStrings(result.SuggestedTasks) {
+		if _, err := s.store.CreateTask(taskTitle, "", nil, 0); err == nil {
+			tasksCreated++
+		}
 	}
 
-	noteIDs := make([]int64, len(notes))
-	for i, n := range notes {
-		noteIDs[i] = n.ID
+	if err := s.store.ApplySleepReplayConsolidation(replayPlan.replayWeightByNoteID, time.Now().UTC()); err != nil {
+		errMsg := fmt.Sprintf("update note consolidation state: %v", err)
+		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, strings.Join(appliedFiles, ","))
+		return nil, fmt.Errorf("%s", errMsg)
 	}
-	s.store.MarkNotesConsolidated(noteIDs)
 
 	s.store.UpdateConsolidationLog(
 		cl.ID,
@@ -214,12 +226,134 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	)
 
 	return &SleepResult{
-		LogID:          cl.ID,
-		NotesProcessed: len(notes),
-		Summary:        result.Summary,
-		KBFilesUpdated: appliedFiles,
-		TasksCreated:   len(result.SuggestedTasks),
+		LogID:            cl.ID,
+		NotesProcessed:   len(notes),
+		NotesReplayed:    len(replayPlan.replayNotes),
+		DuplicatesMerged: replayPlan.duplicatesMerged,
+		Summary:          result.Summary,
+		KBFilesUpdated:   appliedFiles,
+		TasksCreated:     tasksCreated,
 	}, nil
+}
+
+type sleepReplayPlan struct {
+	replayNotes          []model.Note
+	replayWeightByNoteID map[int64]float64
+	duplicatesMerged     int
+}
+
+func buildSleepReplayPlan(notes []model.Note) sleepReplayPlan {
+	if len(notes) == 0 {
+		return sleepReplayPlan{
+			replayWeightByNoteID: map[int64]float64{},
+		}
+	}
+
+	type bucket struct {
+		canonical model.Note
+	}
+
+	buckets := map[string]*bucket{}
+	var order []string
+	replayWeightByNoteID := make(map[int64]float64, len(notes))
+	duplicatesMerged := 0
+
+	for _, n := range notes {
+		key := normalizeNoteContent(n.Content)
+		if key == "" {
+			key = fmt.Sprintf("__note_id__:%d", n.ID)
+		}
+
+		b, ok := buckets[key]
+		if !ok {
+			buckets[key] = &bucket{canonical: n}
+			order = append(order, key)
+			replayWeightByNoteID[n.ID] = 1.0
+			continue
+		}
+
+		current := b.canonical
+		if shouldReplaceCanonical(current, n) {
+			replayWeightByNoteID[current.ID] = 0.35
+			b.canonical = n
+			replayWeightByNoteID[n.ID] = 1.0
+		} else {
+			replayWeightByNoteID[n.ID] = 0.35
+		}
+		duplicatesMerged++
+	}
+
+	replayNotes := make([]model.Note, 0, len(order))
+	for _, key := range order {
+		replayNotes = append(replayNotes, buckets[key].canonical)
+	}
+	sort.SliceStable(replayNotes, func(i, j int) bool {
+		return replayPriority(replayNotes[i]) > replayPriority(replayNotes[j])
+	})
+
+	return sleepReplayPlan{
+		replayNotes:          replayNotes,
+		replayWeightByNoteID: replayWeightByNoteID,
+		duplicatesMerged:     duplicatesMerged,
+	}
+}
+
+func shouldReplaceCanonical(current model.Note, candidate model.Note) bool {
+	currentScore := replayPriority(current)
+	candidateScore := replayPriority(candidate)
+	if candidateScore == currentScore {
+		return candidate.ID < current.ID
+	}
+	return candidateScore > currentScore
+}
+
+func replayPriority(note model.Note) float64 {
+	return (note.Salience * 0.6) + (note.Strength * 0.4)
+}
+
+func normalizeNoteContent(content string) string {
+	normalized := strings.ToLower(strings.TrimSpace(content))
+	if normalized == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(normalized), " ")
+}
+
+func dedupeKBUpdatesByPath(updates []adapter.KBUpdate) []adapter.KBUpdate {
+	if len(updates) == 0 {
+		return nil
+	}
+	indices := make(map[string]int, len(updates))
+	out := make([]adapter.KBUpdate, 0, len(updates))
+	for _, u := range updates {
+		if idx, ok := indices[u.Path]; ok {
+			out[idx] = u
+			continue
+		}
+		indices[u.Path] = len(out)
+		out = append(out, u)
+	}
+	return out
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		key := strings.TrimSpace(v)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }
 
 // Apply writes approved KB files and creates approved tasks.
@@ -251,8 +385,8 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 
 	// Record consolidation event
 	payload, _ := json.Marshal(map[string]any{
-		"log_id":       changes.LogID,
-		"kb_files":     appliedFiles,
+		"log_id":        changes.LogID,
+		"kb_files":      appliedFiles,
 		"tasks_created": len(approvedTaskIndices),
 	})
 	s.store.RecordConsolidationEvent(changes.SessionID, string(payload))
