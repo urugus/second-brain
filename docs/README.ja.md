@@ -172,6 +172,9 @@ sb consolidate
 | `note add <content>` | メモを追加（`-` で stdin から読み込み） | `--tags`, `--source`, `--session` |
 | `note list` | メモ一覧 | `--session`, `--tag` |
 | `note show <id>` | メモの詳細表示 | |
+| `note recall <id>` | メモを想起して記憶強度を補強 | |
+| `note related <id>` | memory edge に基づく関連メモを表示 | `--depth`, `--limit` |
+| `note link <from-id> <to-id>` | 有向 memory edge を作成/強化 | `--weight`, `--evidence` |
 
 ### kb
 
@@ -244,7 +247,7 @@ sb consolidate --model claude-sonnet-4-5-20250514  # モデル指定
 
 ## MCP サーバー
 
-Claude Code 連携用に 17 のツールを公開。
+Claude Code 連携用に 18 のツールを公開。
 
 ### セットアップ
 
@@ -258,7 +261,7 @@ claude mcp add second-brain -- /path/to/sb mcp serve
 |---------|-------|
 | セッション | `get_active_session`, `list_sessions`, `start_session`, `end_session` |
 | タスク | `create_task`, `list_tasks`, `update_task_status` |
-| メモ | `create_note`, `list_notes`, `recall_note`, `related_notes` |
+| メモ | `create_note`, `list_notes`, `recall_note`, `related_notes`, `link_notes` |
 | ナレッジベース | `kb_list`, `kb_read`, `kb_search`, `kb_write` |
 | イベント | `list_events` |
 | 統合 | `consolidate` (モード: propose / apply) |

@@ -174,6 +174,9 @@ sb consolidate
 | `note add <content>` | Add a note (use `-` to read from stdin) | `--tags`, `--source`, `--session` |
 | `note list` | List notes | `--session`, `--tag` |
 | `note show <id>` | Show full note details | |
+| `note recall <id>` | Recall a note to reinforce memory strength | |
+| `note related <id>` | Show related notes from memory edges | `--depth`, `--limit` |
+| `note link <from-id> <to-id>` | Create/reinforce a directed memory edge | `--weight`, `--evidence` |
 
 ### kb
 
@@ -246,7 +249,7 @@ Details: [Phase 5 operations playbook](docs/phase5-operations-playbook.ja.md)
 
 ## MCP Server
 
-The MCP server exposes 17 tools for Claude Code integration.
+The MCP server exposes 18 tools for Claude Code integration.
 
 ### Setup
 
@@ -260,7 +263,7 @@ claude mcp add second-brain -- /path/to/sb mcp serve
 |----------|-------|
 | Session | `get_active_session`, `list_sessions`, `start_session`, `end_session` |
 | Task | `create_task`, `list_tasks`, `update_task_status` |
-| Note | `create_note`, `list_notes`, `recall_note`, `related_notes` |
+| Note | `create_note`, `list_notes`, `recall_note`, `related_notes`, `link_notes` |
 | Knowledge Base | `kb_list`, `kb_read`, `kb_search`, `kb_write` |
 | Event | `list_events` |
 | Consolidation | `consolidate` (modes: propose / apply) |
