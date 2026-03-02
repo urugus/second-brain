@@ -204,12 +204,6 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	}
 	dedupedKBUpdates := dedupeKBUpdatesByPath(result.KBUpdates)
 
-	// Gather note IDs for KB mapping
-	sleepNoteIDs := make([]int64, len(replayPlan.replayNotes))
-	for i, n := range replayPlan.replayNotes {
-		sleepNoteIDs[i] = n.ID
-	}
-
 	var appliedFiles []string
 	var writeErrors []string
 	for _, u := range dedupedKBUpdates {
@@ -221,8 +215,9 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		appliedFiles = append(appliedFiles, u.Path)
 
 		// Record note→KB mapping
-		if len(sleepNoteIDs) > 0 {
-			_ = s.store.MapKBNotes(u.Path, sleepNoteIDs)
+		noteIDs := selectRelevantNoteIDsForKBUpdate(u.Content, replayPlan.replayNotes)
+		if len(noteIDs) > 0 {
+			_ = s.store.MapKBNotes(u.Path, noteIDs)
 		}
 	}
 
@@ -434,6 +429,48 @@ func dedupeStrings(values []string) []string {
 	return out
 }
 
+func selectRelevantNoteIDsForKBUpdate(kbContent string, notes []model.Note) []int64 {
+	if len(notes) == 0 {
+		return nil
+	}
+	if len(notes) == 1 {
+		return []int64{notes[0].ID}
+	}
+
+	normalizedKB := normalizeNoteContent(kbContent)
+	if normalizedKB == "" {
+		return nil
+	}
+
+	seen := make(map[int64]struct{}, len(notes))
+	selected := make([]int64, 0, len(notes))
+	for _, note := range notes {
+		noteKey := normalizeNoteContent(note.Content)
+		if noteKey != "" && strings.Contains(normalizedKB, noteKey) {
+			if _, ok := seen[note.ID]; !ok {
+				seen[note.ID] = struct{}{}
+				selected = append(selected, note.ID)
+			}
+			continue
+		}
+
+		for _, tag := range note.Tags {
+			tagKey := normalizeNoteContent(tag)
+			if tagKey == "" || !strings.Contains(normalizedKB, tagKey) {
+				continue
+			}
+			if _, ok := seen[note.ID]; ok {
+				break
+			}
+			seen[note.ID] = struct{}{}
+			selected = append(selected, note.ID)
+			break
+		}
+	}
+
+	return selected
+}
+
 func summarizeSleepPolicyReasons(decisions []sleepPolicyDecision, limit int) []string {
 	if len(decisions) == 0 || limit <= 0 {
 		return nil
@@ -473,12 +510,8 @@ func (s *Service) recordSleepPredictionError(predicted, actual float64) {
 func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedKBIndices []int, approvedTaskIndices []int) error {
 	var appliedFiles []string
 
-	// Gather session note IDs for KB mapping
+	// Gather session notes for selective KB mapping
 	sessionNotes, _ := s.store.ListNotes(store.NoteFilter{SessionID: &changes.SessionID})
-	noteIDs := make([]int64, len(sessionNotes))
-	for i, n := range sessionNotes {
-		noteIDs[i] = n.ID
-	}
 
 	// Write approved KB files
 	for _, idx := range approvedKBIndices {
@@ -493,6 +526,7 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 		appliedFiles = append(appliedFiles, u.Path)
 
 		// Record note→KB mapping
+		noteIDs := selectRelevantNoteIDsForKBUpdate(u.Content, sessionNotes)
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 		}
