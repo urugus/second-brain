@@ -92,8 +92,8 @@ func TestMigrateFromV3ToLatestBackfillsDefaults(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("expected schema version 5, got %d", version)
+	if version != 6 {
+		t.Fatalf("expected schema version 6, got %d", version)
 	}
 
 	var strength, decayRate, salience float64
@@ -132,6 +132,48 @@ func TestMigrateV5CreatesMemoryEdgesTable(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("expected memory_edges table to exist")
+	}
+}
+
+func TestMigrateV6CreatesPredictionErrorLogTable(t *testing.T) {
+	s := setupTestStore(t)
+
+	exists, err := tableExists(s.db, "prediction_error_log")
+	if err != nil {
+		t.Fatalf("check table exists: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected prediction_error_log table to exist")
+	}
+}
+
+func TestEstimateSyncPredictionUsesRecentCompletedLogs(t *testing.T) {
+	s := setupTestStore(t)
+
+	createLog := func(status model.SyncStatus, notes, tasks int) {
+		log, err := s.CreateSyncLog("test-agent", "prompt")
+		if err != nil {
+			t.Fatalf("create sync log: %v", err)
+		}
+		if err := s.UpdateSyncLog(log.ID, status, "", notes, tasks, "", 0, ""); err != nil {
+			t.Fatalf("update sync log: %v", err)
+		}
+	}
+
+	createLog(model.SyncCompleted, 1, 1)
+	createLog(model.SyncFailed, 100, 100)
+	createLog(model.SyncCompleted, 3, 2)
+	createLog(model.SyncCompleted, 5, 4)
+
+	predNotes, predTasks, err := s.EstimateSyncPrediction(2)
+	if err != nil {
+		t.Fatalf("estimate sync prediction: %v", err)
+	}
+	if !almostEqual(predNotes, 4.0) {
+		t.Fatalf("unexpected notes prediction: got %f want 4.0", predNotes)
+	}
+	if !almostEqual(predTasks, 3.0) {
+		t.Fatalf("unexpected tasks prediction: got %f want 3.0", predTasks)
 	}
 }
 
@@ -334,6 +376,44 @@ func TestApplySleepReplayConsolidation(t *testing.T) {
 	delta2 := after2.Strength - n2.Strength
 	if delta1 <= delta2 {
 		t.Fatalf("expected canonical replay delta > merged replay delta, got canonical=%f merged=%f", delta1, delta2)
+	}
+}
+
+func TestAdjustTodoTaskPriorities(t *testing.T) {
+	s := setupTestStore(t)
+
+	t1, _ := s.CreateTask("low", "", nil, 0)
+	t2, _ := s.CreateTask("mid", "", nil, 2)
+	t3, _ := s.CreateTask("high", "", nil, 4)
+	doneTask, _ := s.CreateTask("done", "", nil, 3)
+	if err := s.UpdateTaskStatus(doneTask.ID, model.TaskDone); err != nil {
+		t.Fatalf("mark done task: %v", err)
+	}
+
+	adjusted, err := s.AdjustTodoTaskPriorities(1, 2)
+	if err != nil {
+		t.Fatalf("adjust todo priorities: %v", err)
+	}
+	if adjusted != 2 {
+		t.Fatalf("expected 2 adjusted tasks, got %d", adjusted)
+	}
+
+	after1, _ := s.GetTask(t1.ID)
+	after2, _ := s.GetTask(t2.ID)
+	after3, _ := s.GetTask(t3.ID)
+	afterDone, _ := s.GetTask(doneTask.ID)
+
+	if after3.Priority != 5 {
+		t.Fatalf("expected high task priority 5, got %d", after3.Priority)
+	}
+	if after2.Priority != 3 {
+		t.Fatalf("expected mid task priority 3, got %d", after2.Priority)
+	}
+	if after1.Priority != 0 {
+		t.Fatalf("expected low task to remain 0, got %d", after1.Priority)
+	}
+	if afterDone.Priority != 3 {
+		t.Fatalf("expected done task to remain 3, got %d", afterDone.Priority)
 	}
 }
 

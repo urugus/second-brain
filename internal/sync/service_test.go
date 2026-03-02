@@ -203,6 +203,103 @@ func TestParseSyncResponse_ClaudeError(t *testing.T) {
 	}
 }
 
+func TestSyncRun_PredictionErrorAdjustsTaskPriority(t *testing.T) {
+	s := setupTestStore(t)
+
+	seedCompleted := func(notes, tasks int) {
+		log, err := s.CreateSyncLog("seed", "prompt")
+		if err != nil {
+			t.Fatalf("create seed sync log: %v", err)
+		}
+		if err := s.UpdateSyncLog(log.ID, model.SyncCompleted, "seed", notes, tasks, "", 10, ""); err != nil {
+			t.Fatalf("update seed sync log: %v", err)
+		}
+	}
+	seedCompleted(2, 1)
+	seedCompleted(2, 1)
+
+	taskA, _ := s.CreateTask("A", "", nil, 1)
+	taskB, _ := s.CreateTask("B", "", nil, 0)
+
+	syncResult := SyncResult{
+		Summary:        "Prediction run",
+		NotesAdded:     4,
+		TasksAdded:     5,
+		KBFilesUpdated: []string{"ops/prediction.md"},
+	}
+	envelope := claudeJSONResponse{Type: "result", StructuredOutput: &syncResult}
+	envelopeJSON, _ := json.Marshal(envelope)
+
+	svc := NewService(s, &mockExecutor{output: envelopeJSON}, "")
+	result, err := svc.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync run: %v", err)
+	}
+
+	if !almostEqualFloat(result.PredictedTasks, 1.0) {
+		t.Fatalf("expected predicted tasks 1.0, got %.2f", result.PredictedTasks)
+	}
+	if result.PriorityDelta != 2 {
+		t.Fatalf("expected priority delta +2, got %d", result.PriorityDelta)
+	}
+	if result.AdjustedTasks != 2 {
+		t.Fatalf("expected 2 adjusted tasks, got %d", result.AdjustedTasks)
+	}
+
+	updatedA, _ := s.GetTask(taskA.ID)
+	updatedB, _ := s.GetTask(taskB.ID)
+	if updatedA.Priority != 3 {
+		t.Fatalf("expected task A priority 3, got %d", updatedA.Priority)
+	}
+	if updatedB.Priority != 2 {
+		t.Fatalf("expected task B priority 2, got %d", updatedB.Priority)
+	}
+
+	logs, err := s.ListPredictionErrors(4)
+	if err != nil {
+		t.Fatalf("list prediction errors: %v", err)
+	}
+	if len(logs) < 2 {
+		t.Fatalf("expected at least 2 prediction logs, got %d", len(logs))
+	}
+
+	foundTaskMetric := false
+	for _, log := range logs {
+		if log.Source != model.PredictionSourceSync {
+			continue
+		}
+		if log.Metric == "tasks_added" {
+			foundTaskMetric = true
+			if log.PriorityDelta != 2 {
+				t.Fatalf("expected tasks_added priority delta 2, got %d", log.PriorityDelta)
+			}
+		}
+	}
+	if !foundTaskMetric {
+		t.Fatal("expected tasks_added prediction error log")
+	}
+}
+
+func TestPriorityDeltaFromError(t *testing.T) {
+	cases := []struct {
+		err  float64
+		want int
+	}{
+		{3.1, 2},
+		{1.0, 1},
+		{0.1, 0},
+		{-0.9, 0},
+		{-1.2, -1},
+		{-4.0, -2},
+	}
+	for _, c := range cases {
+		got := priorityDeltaFromError(c.err)
+		if got != c.want {
+			t.Fatalf("priorityDeltaFromError(%f)=%d want %d", c.err, got, c.want)
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
@@ -214,4 +311,12 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func almostEqualFloat(a, b float64) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < 1e-9
 }

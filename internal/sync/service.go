@@ -18,6 +18,13 @@ type SyncResult struct {
 	NotesAdded     int      `json:"notes_added"`
 	TasksAdded     int      `json:"tasks_added"`
 	KBFilesUpdated []string `json:"kb_files_updated"`
+
+	PredictedNotes float64 `json:"-"`
+	PredictedTasks float64 `json:"-"`
+	NotesError     float64 `json:"-"`
+	TasksError     float64 `json:"-"`
+	PriorityDelta  int     `json:"-"`
+	AdjustedTasks  int     `json:"-"`
 }
 
 // claudeJSONResponse is the envelope returned by `claude -p --output-format json`.
@@ -39,6 +46,11 @@ type Service struct {
 	model    string
 }
 
+const (
+	syncPredictionWindow = 5
+	priorityAdjustLimit  = 5
+)
+
 func NewService(s *store.Store, executor adapter.CommandExecutor, modelName string) *Service {
 	return &Service{store: s, executor: executor, model: modelName}
 }
@@ -46,6 +58,7 @@ func NewService(s *store.Store, executor adapter.CommandExecutor, modelName stri
 // Run executes a single sync: call claude -p with MCP tools, parse result, log.
 func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	prompt := defaultSyncPrompt
+	predictedNotes, predictedTasks := s.estimateExpectedSyncOutcome()
 
 	// Create log entry
 	sl, err := s.store.CreateSyncLog("claude-code", prompt)
@@ -86,6 +99,13 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 		s.store.UpdateSyncLog(sl.ID, model.SyncFailed, "", 0, 0, "", durationMs, err.Error())
 		return nil, err
 	}
+	result.PredictedNotes = predictedNotes
+	result.PredictedTasks = predictedTasks
+	result.NotesError = float64(result.NotesAdded) - predictedNotes
+	result.TasksError = float64(result.TasksAdded) - predictedTasks
+	result.PriorityDelta = priorityDeltaFromError(result.TasksError)
+	result.AdjustedTasks = s.applyPriorityLearning(result.PriorityDelta)
+	s.recordPredictionErrors(result)
 
 	// Log success
 	kbFiles := strings.Join(result.KBFilesUpdated, ",")
@@ -125,4 +145,52 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func (s *Service) estimateExpectedSyncOutcome() (float64, float64) {
+	predictedNotes, predictedTasks, err := s.store.EstimateSyncPrediction(syncPredictionWindow)
+	if err != nil {
+		return 0, 0
+	}
+	return predictedNotes, predictedTasks
+}
+
+func (s *Service) applyPriorityLearning(priorityDelta int) int {
+	adjusted, err := s.store.AdjustTodoTaskPriorities(priorityDelta, priorityAdjustLimit)
+	if err != nil {
+		return 0
+	}
+	return adjusted
+}
+
+func (s *Service) recordPredictionErrors(result *SyncResult) {
+	_ = s.store.RecordPredictionError(
+		model.PredictionSourceSync,
+		"notes_added",
+		result.PredictedNotes,
+		float64(result.NotesAdded),
+		0,
+	)
+	_ = s.store.RecordPredictionError(
+		model.PredictionSourceSync,
+		"tasks_added",
+		result.PredictedTasks,
+		float64(result.TasksAdded),
+		result.PriorityDelta,
+	)
+}
+
+func priorityDeltaFromError(tasksError float64) int {
+	switch {
+	case tasksError >= 3:
+		return 2
+	case tasksError >= 1:
+		return 1
+	case tasksError <= -3:
+		return -2
+	case tasksError <= -1:
+		return -1
+	default:
+		return 0
+	}
 }

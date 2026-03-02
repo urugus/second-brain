@@ -163,6 +163,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	if len(replayPlan.replayNotes) == 0 {
 		return nil, nil
 	}
+	predictedKBUpdates := estimateSleepKBUpdates(len(replayPlan.replayNotes))
 
 	cl, err := s.store.CreateSleepConsolidationLog(s.agent.Name())
 	if err != nil {
@@ -201,6 +202,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 
 	if len(writeErrors) > 0 && len(appliedFiles) == 0 {
 		errMsg := fmt.Sprintf("all KB writes failed: %s", strings.Join(writeErrors, "; "))
+		s.recordSleepPredictionError(predictedKBUpdates, 0)
 		s.store.UpdateConsolidationLog(cl.ID, model.ConsolidationFailed, errMsg, "")
 		return nil, fmt.Errorf("%s", errMsg)
 	}
@@ -224,6 +226,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		result.Summary,
 		strings.Join(appliedFiles, ","),
 	)
+	s.recordSleepPredictionError(predictedKBUpdates, float64(len(appliedFiles)))
 
 	return &SleepResult{
 		LogID:            cl.ID,
@@ -354,6 +357,27 @@ func dedupeStrings(values []string) []string {
 		out = append(out, key)
 	}
 	return out
+}
+
+func estimateSleepKBUpdates(replayedNotes int) float64 {
+	if replayedNotes <= 0 {
+		return 0
+	}
+	estimate := float64(replayedNotes) / 3.0
+	if estimate < 1 {
+		return 1
+	}
+	return estimate
+}
+
+func (s *Service) recordSleepPredictionError(predicted, actual float64) {
+	_ = s.store.RecordPredictionError(
+		model.PredictionSourceSleep,
+		"kb_updates",
+		predicted,
+		actual,
+		0,
+	)
 }
 
 // Apply writes approved KB files and creates approved tasks.
