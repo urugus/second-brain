@@ -192,7 +192,17 @@ func (s *Store) DecayMemories(now time.Time) (int, error) {
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.Query(`SELECT id, strength, decay_rate, COALESCE(last_recalled_at, updated_at) FROM notes`)
+	rows, err := tx.Query(`
+		SELECT
+			id,
+			strength,
+			decay_rate,
+			CASE
+				WHEN last_recalled_at IS NOT NULL AND last_recalled_at > updated_at THEN last_recalled_at
+				ELSE updated_at
+			END AS decay_base_at
+		FROM notes
+	`)
 	if err != nil {
 		return 0, fmt.Errorf("query notes for decay: %w", err)
 	}

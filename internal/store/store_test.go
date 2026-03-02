@@ -233,6 +233,49 @@ func TestDecayMemoriesRespectsMinStrength(t *testing.T) {
 	}
 }
 
+func TestDecayMemoriesUsesMostRecentMemoryTimestamp(t *testing.T) {
+	s := setupTestStore(t)
+
+	note, err := s.CreateNote("decay cadence", nil, nil, "sync")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	decayRate := 0.10
+	startStrength := 0.90
+	base := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(time.Second)
+	baseStr := base.Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE notes SET strength = ?, decay_rate = ?, last_recalled_at = ?, updated_at = ? WHERE id = ?`,
+		startStrength, decayRate, baseStr, baseStr, note.ID,
+	); err != nil {
+		t.Fatalf("seed decay cadence data: %v", err)
+	}
+
+	firstRunAt := base.Add(10 * 24 * time.Hour)
+	if _, err := s.DecayMemories(firstRunAt); err != nil {
+		t.Fatalf("first decay: %v", err)
+	}
+	afterFirst, err := s.GetNote(note.ID)
+	if err != nil {
+		t.Fatalf("get note after first decay: %v", err)
+	}
+
+	secondRunAt := firstRunAt.Add(24 * time.Hour)
+	if _, err := s.DecayMemories(secondRunAt); err != nil {
+		t.Fatalf("second decay: %v", err)
+	}
+	afterSecond, err := s.GetNote(note.ID)
+	if err != nil {
+		t.Fatalf("get note after second decay: %v", err)
+	}
+
+	expectedSecond := afterFirst.Strength * math.Exp(-decayRate*1.0)
+	if !almostEqual(afterSecond.Strength, expectedSecond) {
+		t.Fatalf("unexpected second decay strength: got %f want %f", afterSecond.Strength, expectedSecond)
+	}
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	s := setupTestStore(t)
 
