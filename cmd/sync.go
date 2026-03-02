@@ -190,7 +190,21 @@ func trySleepConsolidate(cmd *cobra.Command, modelFlag string) error {
 	}
 
 	fmt.Printf("\nSleep consolidation triggered (%d notes processed).\n", sleepResult.NotesProcessed)
-	if sleepResult.NotesReplayed > 0 && sleepResult.NotesReplayed != sleepResult.NotesProcessed {
+	if sleepResult.PolicyCandidates > 0 {
+		fmt.Printf("  Policy selected: %d/%d (threshold %.2f)\n",
+			sleepResult.PolicySelected,
+			sleepResult.PolicyCandidates,
+			sleepResult.PolicyThreshold,
+		)
+	}
+	for _, reason := range sleepResult.PolicyReasons {
+		fmt.Printf("    - %s\n", reason)
+	}
+	selectionBase := sleepResult.PolicySelected
+	if selectionBase == 0 {
+		selectionBase = sleepResult.NotesProcessed
+	}
+	if sleepResult.NotesReplayed > 0 && sleepResult.NotesReplayed != selectionBase {
 		fmt.Printf("  Notes replayed after dedupe: %d (merged duplicates: %d)\n", sleepResult.NotesReplayed, sleepResult.DuplicatesMerged)
 	}
 	fmt.Printf("  Summary: %s\n", sleepResult.Summary)

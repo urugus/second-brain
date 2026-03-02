@@ -135,6 +135,10 @@ func (s *Service) Propose(ctx context.Context, sessionID int64) (*ProposedChange
 type SleepResult struct {
 	LogID            int64
 	NotesProcessed   int
+	PolicyCandidates int
+	PolicySelected   int
+	PolicyThreshold  float64
+	PolicyReasons    []string
 	NotesReplayed    int
 	DuplicatesMerged int
 	Summary          string
@@ -161,7 +165,12 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		return nil, nil
 	}
 	runtimeCfg := config.LoadRuntime()
-	replayPlan := buildSleepReplayPlan(notes, runtimeCfg.SleepDuplicateReplayWeight, runtimeCfg.SleepReplayEnabled)
+	now := time.Now().UTC()
+	policyResult := applySleepLongTermPolicy(notes, now, runtimeCfg)
+	if len(policyResult.SelectedNotes) == 0 {
+		return nil, nil
+	}
+	replayPlan := buildSleepReplayPlan(policyResult.SelectedNotes, runtimeCfg.SleepDuplicateReplayWeight, runtimeCfg.SleepReplayEnabled)
 	if len(replayPlan.replayNotes) == 0 {
 		return nil, nil
 	}
@@ -250,8 +259,8 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 			return nil, fmt.Errorf("%s", errMsg)
 		}
 	} else {
-		noteIDs := make([]int64, len(notes))
-		for i, n := range notes {
+		noteIDs := make([]int64, len(policyResult.SelectedNotes))
+		for i, n := range policyResult.SelectedNotes {
 			noteIDs[i] = n.ID
 		}
 		if err := s.store.MarkNotesConsolidated(noteIDs); err != nil {
@@ -274,6 +283,10 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	return &SleepResult{
 		LogID:            cl.ID,
 		NotesProcessed:   len(notes),
+		PolicyCandidates: policyResult.CandidateCount,
+		PolicySelected:   len(policyResult.SelectedNotes),
+		PolicyThreshold:  policyResult.Threshold,
+		PolicyReasons:    summarizeSleepPolicyReasons(policyResult.Decisions, 5),
 		NotesReplayed:    len(replayPlan.replayNotes),
 		DuplicatesMerged: replayPlan.duplicatesMerged,
 		Summary:          result.Summary,
@@ -411,6 +424,20 @@ func dedupeStrings(values []string) []string {
 		out = append(out, key)
 	}
 	return out
+}
+
+func summarizeSleepPolicyReasons(decisions []sleepPolicyDecision, limit int) []string {
+	if len(decisions) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(decisions) < limit {
+		limit = len(decisions)
+	}
+	reasons := make([]string, 0, limit)
+	for _, d := range decisions[:limit] {
+		reasons = append(reasons, fmt.Sprintf("note#%d %s", d.NoteID, d.Reason))
+	}
+	return reasons
 }
 
 func estimateSleepKBUpdates(replayedNotes int) float64 {
