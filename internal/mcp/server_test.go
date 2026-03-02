@@ -314,14 +314,99 @@ func TestListEvents(t *testing.T) {
 	}
 }
 
+func TestStartSession(t *testing.T) {
+	session, _, _ := setup(t)
+
+	result := callTool(t, session, "start_session", map[string]any{
+		"title": "Dev Session",
+		"goal":  "Implement feature X",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+	text := getTextContent(t, result)
+
+	var sess map[string]any
+	if err := json.Unmarshal([]byte(text), &sess); err != nil {
+		t.Fatalf("failed to parse session JSON: %v", err)
+	}
+	if sess["Title"] != "Dev Session" {
+		t.Errorf("expected title 'Dev Session', got %v", sess["Title"])
+	}
+	if sess["Goal"] != "Implement feature X" {
+		t.Errorf("expected goal 'Implement feature X', got %v", sess["Goal"])
+	}
+	if sess["Status"] != "active" {
+		t.Errorf("expected status 'active', got %v", sess["Status"])
+	}
+}
+
+func TestStartSession_FailWhenActiveExists(t *testing.T) {
+	session, s, _ := setup(t)
+	s.CreateSession("Existing Session", "")
+
+	result := callTool(t, session, "start_session", map[string]any{
+		"title": "Another Session",
+	})
+	if !result.IsError {
+		t.Error("expected error when active session exists")
+	}
+	text := getTextContent(t, result)
+	if text != "failed to start session: an active session already exists; end or abandon it first" {
+		t.Errorf("unexpected error message: %q", text)
+	}
+}
+
+func TestEndSession(t *testing.T) {
+	session, s, _ := setup(t)
+	s.CreateSession("Work Session", "some goal")
+
+	result := callTool(t, session, "end_session", map[string]any{
+		"summary": "Completed the work",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getTextContent(t, result))
+	}
+	text := getTextContent(t, result)
+
+	var sess map[string]any
+	if err := json.Unmarshal([]byte(text), &sess); err != nil {
+		t.Fatalf("failed to parse session JSON: %v", err)
+	}
+	if sess["Title"] != "Work Session" {
+		t.Errorf("expected title 'Work Session', got %v", sess["Title"])
+	}
+	if sess["Status"] != "completed" {
+		t.Errorf("expected status 'completed', got %v", sess["Status"])
+	}
+	if sess["Summary"] != "Completed the work" {
+		t.Errorf("expected summary 'Completed the work', got %v", sess["Summary"])
+	}
+}
+
+func TestEndSession_FailWhenNoActive(t *testing.T) {
+	session, _, _ := setup(t)
+
+	result := callTool(t, session, "end_session", map[string]any{
+		"summary": "Nothing to end",
+	})
+	if !result.IsError {
+		t.Error("expected error when no active session")
+	}
+	text := getTextContent(t, result)
+	if text != "no active session" {
+		t.Errorf("unexpected error message: %q", text)
+	}
+}
+
 func TestToolsListCount(t *testing.T) {
 	session, _, _ := setup(t)
 	result, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 12 {
-		t.Errorf("expected 12 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 14 {
+		t.Errorf("expected 14 tools, got %d", len(result.Tools))
 		for _, tool := range result.Tools {
 			t.Logf("  - %s", tool.Name)
 		}
