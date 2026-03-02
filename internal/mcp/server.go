@@ -5,12 +5,42 @@ import (
 	"fmt"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/urugus/second-brain/internal/adapter"
+	claudeAdapter "github.com/urugus/second-brain/internal/adapter/claude"
 	"github.com/urugus/second-brain/internal/kb"
 	"github.com/urugus/second-brain/internal/store"
 )
 
+// Option configures the MCP server.
+type Option func(*serverConfig)
+
+type serverConfig struct {
+	agentFactory AgentFactory
+}
+
+// WithAgentFactory overrides the default AgentFactory used for consolidation.
+// This is primarily useful for testing.
+func WithAgentFactory(f AgentFactory) Option {
+	return func(c *serverConfig) { c.agentFactory = f }
+}
+
+func defaultAgentFactory(model string) adapter.Agent {
+	var opts []claudeAdapter.Option
+	if model != "" {
+		opts = append(opts, claudeAdapter.WithModel(model))
+	}
+	return claudeAdapter.New(opts...)
+}
+
 // New creates a configured MCP server with all second-brain tools registered.
-func New(s *store.Store, k *kb.KB) *gomcp.Server {
+func New(s *store.Store, k *kb.KB, opts ...Option) *gomcp.Server {
+	cfg := &serverConfig{
+		agentFactory: defaultAgentFactory,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	server := gomcp.NewServer(&gomcp.Implementation{
 		Name:    "second-brain",
 		Version: "0.1.0",
@@ -21,6 +51,7 @@ func New(s *store.Store, k *kb.KB) *gomcp.Server {
 	registerNoteTools(server, s)
 	registerKBTools(server, k)
 	registerEventTools(server, s)
+	registerConsolidationTools(server, s, k, cfg.agentFactory)
 
 	return server
 }
