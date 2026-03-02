@@ -124,7 +124,7 @@ sb consolidate --model claude-sonnet-4-5-20250514  # Specify model
 
 ## MCP Server
 
-The MCP server exposes 15 tools for Claude Code integration.
+The MCP server exposes 17 tools for Claude Code integration.
 
 ### Setup
 
@@ -138,7 +138,7 @@ claude mcp add second-brain -- /path/to/sb mcp serve
 |----------|-------|
 | Session | `get_active_session`, `list_sessions`, `start_session`, `end_session` |
 | Task | `create_task`, `list_tasks`, `update_task_status` |
-| Note | `create_note`, `list_notes` |
+| Note | `create_note`, `list_notes`, `recall_note`, `related_notes` |
 | Knowledge Base | `kb_list`, `kb_read`, `kb_search`, `kb_write` |
 | Event | `list_events` |
 | Consolidation | `consolidate` (modes: propose / apply) |

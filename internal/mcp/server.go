@@ -38,7 +38,7 @@ const serverInstructions = `second-brain is a personal knowledge management syst
 Available tool categories:
 - Session management: start_session, end_session, get_active_session, list_sessions
 - Task tracking: create_task, list_tasks, update_task_status
-- Note taking: create_note, list_notes, recall_note
+- Note taking: create_note, list_notes, recall_note, related_notes
 - Knowledge base: kb_list, kb_read, kb_search, kb_write
 - Event tracking: list_events
 - Consolidation: consolidate

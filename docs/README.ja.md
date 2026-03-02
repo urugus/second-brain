@@ -122,7 +122,7 @@ sb consolidate --model claude-sonnet-4-5-20250514  # モデル指定
 
 ## MCP サーバー
 
-Claude Code 連携用に 15 のツールを公開。
+Claude Code 連携用に 17 のツールを公開。
 
 ### セットアップ
 
@@ -136,7 +136,7 @@ claude mcp add second-brain -- /path/to/sb mcp serve
 |---------|-------|
 | セッション | `get_active_session`, `list_sessions`, `start_session`, `end_session` |
 | タスク | `create_task`, `list_tasks`, `update_task_status` |
-| メモ | `create_note`, `list_notes` |
+| メモ | `create_note`, `list_notes`, `recall_note`, `related_notes` |
 | ナレッジベース | `kb_list`, `kb_read`, `kb_search`, `kb_write` |
 | イベント | `list_events` |
 | 統合 | `consolidate` (モード: propose / apply) |

@@ -165,6 +165,40 @@ var noteRecallCmd = &cobra.Command{
 	},
 }
 
+var noteRelatedCmd = &cobra.Command{
+	Use:   "related <id>",
+	Short: "Show related notes based on memory edges",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid note ID: %s", args[0])
+		}
+
+		depth, _ := cmd.Flags().GetInt("depth")
+		limit, _ := cmd.Flags().GetInt("limit")
+		related, err := appStore.RelatedNotes(id, depth, limit)
+		if err != nil {
+			return err
+		}
+		if len(related) == 0 {
+			fmt.Println("No related notes found.")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tSCORE\tCONTENT")
+		for _, rn := range related {
+			content := rn.Note.Content
+			if len(content) > 50 {
+				content = content[:50] + "..."
+			}
+			fmt.Fprintf(w, "%d\t%.4f\t%s\n", rn.Note.ID, rn.Score, content)
+		}
+		return w.Flush()
+	},
+}
+
 func noteFilterForSession(sessionID int64) store.NoteFilter {
 	return store.NoteFilter{SessionID: &sessionID}
 }
@@ -176,7 +210,9 @@ func init() {
 
 	noteListCmd.Flags().Int64("session", 0, "Filter by session ID")
 	noteListCmd.Flags().String("tag", "", "Filter by tag")
+	noteRelatedCmd.Flags().Int("depth", 1, "Traversal depth for related notes")
+	noteRelatedCmd.Flags().Int("limit", 10, "Maximum number of related notes")
 
-	noteCmd.AddCommand(noteAddCmd, noteListCmd, noteShowCmd, noteRecallCmd)
+	noteCmd.AddCommand(noteAddCmd, noteListCmd, noteShowCmd, noteRecallCmd, noteRelatedCmd)
 	rootCmd.AddCommand(noteCmd)
 }
