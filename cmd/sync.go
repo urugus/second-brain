@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/urugus/second-brain/internal/adapter"
+	claudeAdapter "github.com/urugus/second-brain/internal/adapter/claude"
+	"github.com/urugus/second-brain/internal/consolidation"
 	sbsync "github.com/urugus/second-brain/internal/sync"
 )
 
@@ -39,6 +41,11 @@ and save important information to second-brain.`,
 		if len(result.KBFilesUpdated) > 0 {
 			fmt.Printf("  KB files updated: %v\n", result.KBFilesUpdated)
 		}
+
+		if err := trySleepConsolidate(cmd, modelFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "Sleep consolidation error: %v\n", err)
+		}
+
 		return nil
 	},
 }
@@ -127,6 +134,36 @@ var syncLogCmd = &cobra.Command{
 		}
 		return w.Flush()
 	},
+}
+
+const defaultSleepThreshold = 10
+
+func trySleepConsolidate(cmd *cobra.Command, modelFlag string) error {
+	var opts []claudeAdapter.Option
+	if modelFlag != "" {
+		opts = append(opts, claudeAdapter.WithModel(modelFlag))
+	}
+	agent := claudeAdapter.New(opts...)
+
+	svc := consolidation.NewService(appStore, appKB, agent)
+
+	sleepResult, err := svc.SleepConsolidate(cmd.Context(), defaultSleepThreshold)
+	if err != nil {
+		return err
+	}
+	if sleepResult == nil {
+		return nil
+	}
+
+	fmt.Printf("\nSleep consolidation triggered (%d notes processed).\n", sleepResult.NotesProcessed)
+	fmt.Printf("  Summary: %s\n", sleepResult.Summary)
+	if len(sleepResult.KBFilesUpdated) > 0 {
+		fmt.Printf("  KB files updated: %v\n", sleepResult.KBFilesUpdated)
+	}
+	if sleepResult.TasksCreated > 0 {
+		fmt.Printf("  Tasks created: %d\n", sleepResult.TasksCreated)
+	}
+	return nil
 }
 
 func init() {

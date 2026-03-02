@@ -129,6 +129,66 @@ func buildConsolidationPrompt(session *model.Session, events []model.Event, note
 	return b.String()
 }
 
+const sleepSystemPrompt = `You are a knowledge consolidation agent for a personal "Second Brain" system.
+You are performing "sleep-mode" consolidation: processing accumulated notes that were
+collected over time from various sources (Slack messages, observations, etc.).
+
+Unlike session-based consolidation, there is no specific work session context. These notes
+were gathered incrementally by an automated sync process and need to be organized into
+the long-term knowledge base.
+
+You will receive a list of unconsolidated notes and existing knowledge base files.
+
+Your job:
+1. Produce a concise summary of what themes and information the notes contain.
+2. Identify knowledge worth preserving long-term and produce KB file updates.
+   - For existing files: return the complete updated content (not a diff).
+   - For new topics: create new files with descriptive filenames.
+   - File paths should use lowercase-kebab-case with .md extension.
+   - Organize into subdirectories by topic if appropriate.
+   - Write in clear, concise Markdown.
+3. Suggest actionable follow-up tasks if any notes imply action is needed.
+
+Guidelines:
+- Only create/update KB files for genuinely useful long-term knowledge.
+- Do NOT create entries for trivial or ephemeral information.
+- Merge new information into existing files when the topic already exists.
+- Group related notes together when updating/creating KB files.
+- If there is nothing worth persisting, return empty kb_updates.
+- Notes may come from different time periods -- focus on content, not chronology.`
+
+func buildSleepConsolidationPrompt(notes []model.Note, kbFiles []string) string {
+	var b strings.Builder
+
+	b.WriteString(sleepSystemPrompt)
+	b.WriteString("\n\n---\n\n")
+
+	if len(notes) > 0 {
+		b.WriteString("## Unconsolidated Notes\n")
+		for _, n := range notes {
+			tags := ""
+			if len(n.Tags) > 0 {
+				tags = fmt.Sprintf(" [tags: %s]", strings.Join(n.Tags, ", "))
+			}
+			source := ""
+			if n.Source != "" {
+				source = fmt.Sprintf(" (source: %s)", n.Source)
+			}
+			fmt.Fprintf(&b, "- [%s] %s%s%s\n",
+				n.CreatedAt.Format("2006-01-02 15:04"), n.Content, tags, source)
+		}
+	}
+
+	if len(kbFiles) > 0 {
+		b.WriteString("\n## Existing Knowledge Base Files\n")
+		for _, f := range kbFiles {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
+
+	return b.String()
+}
+
 func buildSummarizePrompt(text string) string {
 	return fmt.Sprintf("Summarize the following text in 2-3 sentences:\n\n%s", text)
 }

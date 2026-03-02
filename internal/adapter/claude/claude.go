@@ -63,8 +63,12 @@ type kbUpdate struct {
 }
 
 func (a *Agent) Consolidate(ctx context.Context, req adapter.ConsolidationRequest) (*adapter.ConsolidationResult, error) {
-	prompt := buildConsolidationPrompt(req.Session, req.Events, req.Notes, req.Tasks, req.ExistingKB)
-
+	var prompt string
+	if req.Mode == "sleep" {
+		prompt = buildSleepConsolidationPrompt(req.Notes, req.ExistingKB)
+	} else {
+		prompt = buildConsolidationPrompt(req.Session, req.Events, req.Notes, req.Tasks, req.ExistingKB)
+	}
 
 	args := a.buildArgs(prompt)
 

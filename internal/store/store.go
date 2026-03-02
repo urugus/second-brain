@@ -55,6 +55,7 @@ func (s *Store) migrate() error {
 	migrations := []func(tx *sql.Tx) error{
 		migrateV1,
 		migrateV2,
+		migrateV3,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -144,6 +145,19 @@ func migrateV1(tx *sql.Tx) error {
 		)`,
 	}
 
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:40], err)
+		}
+	}
+	return nil
+}
+
+func migrateV3(tx *sql.Tx) error {
+	statements := []string{
+		`ALTER TABLE notes ADD COLUMN consolidated_at TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_notes_unconsolidated ON notes(consolidated_at) WHERE consolidated_at IS NULL`,
+	}
 	for _, stmt := range statements {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("exec %q: %w", stmt[:40], err)

@@ -13,7 +13,7 @@ const (
 
 type ConsolidationLog struct {
 	ID             int64
-	SessionID      int64
+	SessionID      *int64
 	Agent          string
 	InputSummary   string
 	OutputSummary  string

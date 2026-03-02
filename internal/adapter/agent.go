@@ -8,6 +8,7 @@ import (
 
 // ConsolidationRequest contains the data an agent needs to perform consolidation.
 type ConsolidationRequest struct {
+	Mode       string // "session" or "sleep"
 	Session    *model.Session
 	Notes      []model.Note
 	Tasks      []model.Task
