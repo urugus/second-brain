@@ -3,11 +3,15 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
+	"github.com/urugus/second-brain/internal/config"
 	"github.com/urugus/second-brain/internal/model"
 )
+
+const minEdgeWeightEpsilon = 1e-6
 
 func (s *Store) LinkNotes(fromNoteID, toNoteID int64, weight float64, evidence string) error {
 	if fromNoteID == toNoteID {
@@ -143,4 +147,78 @@ func (s *Store) RelatedNotes(seedNoteID int64, depth, topK int) ([]model.Related
 		})
 	}
 	return related, nil
+}
+
+func (s *Store) DecayMemoryEdges(now time.Time) (int, error) {
+	cfg := config.LoadRuntime()
+	if !cfg.MemoryEdgeDecayEnabled || cfg.MemoryEdgeDecayRate <= 0 {
+		return 0, nil
+	}
+
+	now = now.UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT id, weight, updated_at FROM memory_edges`)
+	if err != nil {
+		return 0, fmt.Errorf("query memory edges for decay: %w", err)
+	}
+	defer rows.Close()
+
+	affected := 0
+	for rows.Next() {
+		var (
+			id        int64
+			weight    float64
+			updatedAt string
+		)
+		if err := rows.Scan(&id, &weight, &updatedAt); err != nil {
+			return 0, fmt.Errorf("scan memory edge for decay: %w", err)
+		}
+
+		baseTime, err := time.Parse(time.RFC3339, updatedAt)
+		if err != nil {
+			continue
+		}
+		dtDays := now.Sub(baseTime.UTC()).Hours() / 24
+		if dtDays <= 0 {
+			continue
+		}
+
+		newWeight := weight * math.Exp(-cfg.MemoryEdgeDecayRate*dtDays)
+		floor := cfg.MemoryEdgeMinWeight
+		if floor <= 0 {
+			floor = minEdgeWeightEpsilon
+		}
+		if floor > weight {
+			floor = weight
+		}
+		if newWeight < floor {
+			newWeight = floor
+		}
+		if math.Abs(newWeight-weight) < 1e-9 {
+			continue
+		}
+
+		if _, err := tx.Exec(
+			`UPDATE memory_edges SET weight = ?, updated_at = ? WHERE id = ?`,
+			newWeight, nowStr, id,
+		); err != nil {
+			return 0, fmt.Errorf("update decayed memory edge %d: %w", id, err)
+		}
+		affected++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate memory edges for decay: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit memory edge decay: %w", err)
+	}
+	return affected, nil
 }

@@ -27,6 +27,9 @@ func setupTestStore(t *testing.T) *store.Store {
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "1")
+	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "0.010")
+	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "0.02")
 
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -131,6 +134,63 @@ func TestSyncRun_AppliesMemoryDecay(t *testing.T) {
 			beforeDecay.Strength,
 			afterDecay.Strength,
 		)
+	}
+}
+
+func TestSyncRun_AppliesMemoryEdgeDecay(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "1.0")
+	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "0.01")
+
+	a, _ := s.CreateNote("edge decay source", nil, nil, "manual")
+	b, _ := s.CreateNote("edge decay target", nil, nil, "manual")
+	if err := s.LinkNotes(a.ID, b.ID, 0.90, "sync-edge-decay"); err != nil {
+		t.Fatalf("link notes: %v", err)
+	}
+
+	beforeRelated, err := s.RelatedNotes(a.ID, 1, 5)
+	if err != nil {
+		t.Fatalf("related notes before sync: %v", err)
+	}
+	if len(beforeRelated) == 0 {
+		t.Fatal("expected related note before sync")
+	}
+	beforeScore := beforeRelated[0].Score
+
+	// updated_at precision is seconds; ensure measurable dt.
+	time.Sleep(1100 * time.Millisecond)
+
+	syncResult := SyncResult{
+		Summary:        "Sync with edge decay",
+		NotesAdded:     0,
+		TasksAdded:     0,
+		KBFilesUpdated: []string{},
+	}
+	envelope := claudeJSONResponse{
+		Type:             "result",
+		StructuredOutput: &syncResult,
+	}
+	envelopeJSON, _ := json.Marshal(envelope)
+
+	svc := NewService(s, &mockExecutor{output: envelopeJSON}, "")
+	result, err := svc.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync run: %v", err)
+	}
+	if result.DecayedEdges < 1 {
+		t.Fatalf("expected at least 1 decayed edge, got %d", result.DecayedEdges)
+	}
+
+	afterRelated, err := s.RelatedNotes(a.ID, 1, 5)
+	if err != nil {
+		t.Fatalf("related notes after sync: %v", err)
+	}
+	if len(afterRelated) == 0 {
+		t.Fatal("expected related note after sync")
+	}
+	afterScore := afterRelated[0].Score
+	if afterScore >= beforeScore {
+		t.Fatalf("expected edge score to decay during sync run: before=%f after=%f", beforeScore, afterScore)
 	}
 }
 

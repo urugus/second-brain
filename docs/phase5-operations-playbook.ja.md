@@ -31,6 +31,8 @@ sb sync metrics --days 14
 | `SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE` | `0.34` | note 作成時の自動生成 memory edge の最小スコア閾値 |
 | `SB_MEMORY_EDGE_CREATE_AUTOLINK_CANDIDATES` | `80` | note 作成時の類似候補探索件数 |
 | `SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS` | `3` | note 1件作成あたりの自動生成リンク上限 |
+| `SB_MEMORY_EDGE_DECAY_RATE` | `0.010` | sync 実行時に適用する memory edge 減衰率 |
+| `SB_MEMORY_EDGE_MIN_WEIGHT` | `0.02` | memory edge 減衰後の最小重み |
 | `SB_METRICS_WINDOW_DAYS` | `14` | `sync metrics` の既定集計期間 |
 
 ## 3. Feature Flag とロールバック
@@ -43,6 +45,7 @@ sb sync metrics --days 14
 | `SB_FEATURE_SLEEP_REPLAY` | `1` | sleep replay の dedupe/強度更新を停止（従来の consolidated_at 更新のみ） |
 | `SB_FEATURE_MEMORY_EDGE_AUTOLINK` | `1` | consolidation 時の note 間自動リンク生成を停止 |
 | `SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK` | `0` | note 作成時の自動リンク生成を有効化/停止 |
+| `SB_FEATURE_MEMORY_EDGE_DECAY` | `1` | sync 実行時の memory edge 減衰を停止 |
 
 ### 緊急ロールバック手順
 1. 実行環境で以下を設定する。
@@ -50,6 +53,7 @@ sb sync metrics --days 14
    - `SB_FEATURE_SLEEP_REPLAY=0`
    - `SB_FEATURE_MEMORY_EDGE_AUTOLINK=0`
    - `SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK=0`
+   - `SB_FEATURE_MEMORY_EDGE_DECAY=0`
 2. `sb sync run` を 1 回実行し、処理が継続可能か確認する。
 3. `sb sync metrics --days 7` で KPI の急変有無を確認する。
 4. 必要に応じてパラメータを段階的に戻し、feature flag を再有効化する。

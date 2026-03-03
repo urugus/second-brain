@@ -770,6 +770,168 @@ func TestRelatedNotesAvoidsCycleAmplification(t *testing.T) {
 	}
 }
 
+func TestDecayMemoryEdges(t *testing.T) {
+	s := setupTestStore(t)
+
+	a, _ := s.CreateNote("edge source", nil, nil, "manual")
+	b, _ := s.CreateNote("edge target", nil, nil, "manual")
+	if err := s.LinkNotes(a.ID, b.ID, 0.80, "decay-target"); err != nil {
+		t.Fatalf("link notes: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE memory_edges SET updated_at = ? WHERE from_note_id = ? AND to_note_id = ?`,
+		past, a.ID, b.ID,
+	); err != nil {
+		t.Fatalf("seed edge timestamp: %v", err)
+	}
+
+	var before float64
+	if err := s.db.QueryRow(
+		`SELECT weight FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&before); err != nil {
+		t.Fatalf("query edge before decay: %v", err)
+	}
+
+	affected, err := s.DecayMemoryEdges(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay memory edges: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected 1 decayed edge, got %d", affected)
+	}
+
+	var after float64
+	if err := s.db.QueryRow(
+		`SELECT weight FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&after); err != nil {
+		t.Fatalf("query edge after decay: %v", err)
+	}
+	if after >= before {
+		t.Fatalf("expected edge weight to decrease: before=%f after=%f", before, after)
+	}
+}
+
+func TestDecayMemoryEdgesRespectsMinWeight(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "1.0")
+	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "0.25")
+
+	a, _ := s.CreateNote("edge source", nil, nil, "manual")
+	b, _ := s.CreateNote("edge target", nil, nil, "manual")
+	if err := s.LinkNotes(a.ID, b.ID, 0.30, "decay-floor"); err != nil {
+		t.Fatalf("link notes: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-365 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE memory_edges SET updated_at = ? WHERE from_note_id = ? AND to_note_id = ?`,
+		past, a.ID, b.ID,
+	); err != nil {
+		t.Fatalf("seed edge timestamp: %v", err)
+	}
+
+	_, err := s.DecayMemoryEdges(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay memory edges: %v", err)
+	}
+
+	var weight float64
+	if err := s.db.QueryRow(
+		`SELECT weight FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&weight); err != nil {
+		t.Fatalf("query decayed edge: %v", err)
+	}
+	if weight < 0.25 {
+		t.Fatalf("expected decayed weight to respect minimum 0.25, got %f", weight)
+	}
+}
+
+func TestDecayMemoryEdgesDisabled(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "0")
+
+	a, _ := s.CreateNote("edge source", nil, nil, "manual")
+	b, _ := s.CreateNote("edge target", nil, nil, "manual")
+	if err := s.LinkNotes(a.ID, b.ID, 0.70, "decay-disabled"); err != nil {
+		t.Fatalf("link notes: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE memory_edges SET updated_at = ? WHERE from_note_id = ? AND to_note_id = ?`,
+		past, a.ID, b.ID,
+	); err != nil {
+		t.Fatalf("seed edge timestamp: %v", err)
+	}
+
+	var before float64
+	if err := s.db.QueryRow(
+		`SELECT weight FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&before); err != nil {
+		t.Fatalf("query edge before disabled decay: %v", err)
+	}
+
+	affected, err := s.DecayMemoryEdges(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay memory edges: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("expected 0 decayed edges when disabled, got %d", affected)
+	}
+
+	var after float64
+	if err := s.db.QueryRow(
+		`SELECT weight FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&after); err != nil {
+		t.Fatalf("query edge after disabled decay: %v", err)
+	}
+	if !almostEqual(before, after) {
+		t.Fatalf("expected unchanged edge weight when decay disabled: before=%f after=%f", before, after)
+	}
+}
+
+func TestDecayMemoryEdgesKeepsPositiveWeightWhenMinIsZero(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "1.0")
+	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "0")
+
+	a, _ := s.CreateNote("edge source", nil, nil, "manual")
+	b, _ := s.CreateNote("edge target", nil, nil, "manual")
+	if err := s.LinkNotes(a.ID, b.ID, 0.20, "decay-zero-floor"); err != nil {
+		t.Fatalf("link notes: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-2000 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE memory_edges SET updated_at = ? WHERE from_note_id = ? AND to_note_id = ?`,
+		past, a.ID, b.ID,
+	); err != nil {
+		t.Fatalf("seed edge timestamp: %v", err)
+	}
+
+	if _, err := s.DecayMemoryEdges(time.Now().UTC()); err != nil {
+		t.Fatalf("decay memory edges with zero floor: %v", err)
+	}
+
+	var weight float64
+	if err := s.db.QueryRow(
+		`SELECT weight FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		a.ID, b.ID,
+	).Scan(&weight); err != nil {
+		t.Fatalf("query decayed edge: %v", err)
+	}
+	if weight <= 0 {
+		t.Fatalf("expected strictly positive edge weight, got %f", weight)
+	}
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	s := setupTestStore(t)
 
