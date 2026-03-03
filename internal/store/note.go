@@ -195,7 +195,7 @@ func (s *Store) ApplySleepReplayConsolidation(replayWeightByNoteID map[int64]flo
 	return nil
 }
 
-func (s *Store) RecallNote(id int64, now time.Time, _ string) error {
+func (s *Store) RecallNote(id int64, now time.Time, context string) error {
 	now = now.UTC()
 	nowStr := now.Format(time.RFC3339)
 
@@ -207,10 +207,11 @@ func (s *Store) RecallNote(id int64, now time.Time, _ string) error {
 
 	var strength, salience float64
 	var recallCount int
+	var content, tags string
 	err = tx.QueryRow(
-		`SELECT strength, salience, recall_count FROM notes WHERE id = ?`,
+		`SELECT strength, salience, recall_count, content, tags FROM notes WHERE id = ?`,
 		id,
-	).Scan(&strength, &salience, &recallCount)
+	).Scan(&strength, &salience, &recallCount, &content, &tags)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("note %d not found", id)
 	}
@@ -218,7 +219,7 @@ func (s *Store) RecallNote(id int64, now time.Time, _ string) error {
 		return fmt.Errorf("get note: %w", err)
 	}
 
-	delta := recallAlpha * salience * (1 - strength)
+	delta := recallAlpha * salience * (1 - strength) * recallContextBoost(context, content, tags)
 	newStrength := clamp(strength+delta, 0, 1)
 
 	_, err = tx.Exec(
@@ -230,6 +231,81 @@ func (s *Store) RecallNote(id int64, now time.Time, _ string) error {
 	}
 
 	return tx.Commit()
+}
+
+func recallContextBoost(context, content, tags string) float64 {
+	terms := tokenizeContextTerms(context)
+	if len(terms) == 0 {
+		return 1.0
+	}
+
+	noteText := normalizeContextText(content + " " + strings.ReplaceAll(tags, ",", " "))
+	if noteText == "" {
+		return 1.0
+	}
+
+	matched := 0
+	for _, term := range terms {
+		if strings.Contains(noteText, term) {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return 1.0
+	}
+
+	// Context match increases reinforcement up to +35%.
+	ratio := float64(matched) / float64(len(terms))
+	return 1.0 + (0.35 * ratio)
+}
+
+func tokenizeContextTerms(text string) []string {
+	normalized := normalizeContextText(text)
+	if normalized == "" {
+		return nil
+	}
+	parts := strings.Fields(normalized)
+	seen := make(map[string]struct{}, len(parts))
+	terms := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) < 2 {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		terms = append(terms, part)
+	}
+	return terms
+}
+
+func normalizeContextText(text string) string {
+	lowered := strings.ToLower(strings.TrimSpace(text))
+	if lowered == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		",", " ",
+		".", " ",
+		";", " ",
+		":", " ",
+		"!", " ",
+		"?", " ",
+		"(", " ",
+		")", " ",
+		"[", " ",
+		"]", " ",
+		"{", " ",
+		"}", " ",
+		"\"", " ",
+		"'", " ",
+		"`", " ",
+		"/", " ",
+		"\\", " ",
+	)
+	cleaned := replacer.Replace(lowered)
+	return strings.Join(strings.Fields(cleaned), " ")
 }
 
 func (s *Store) DecayMemories(now time.Time) (int, error) {
