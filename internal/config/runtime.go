@@ -27,6 +27,7 @@ type Runtime struct {
 	MemoryEdgeFeedbackAlpha    float64
 	MemoryEdgeFeedbackDecay    float64
 	MemoryEdgeFeedbackMaxEdges int
+	EntityAutoEdgeMaxPairs     int
 	TaskPriorityMax            int
 	SyncFocusNotesLimit        int
 	SyncFocusTasksLimit        int
@@ -39,6 +40,7 @@ type Runtime struct {
 	MemoryEdgeCreateEnabled    bool
 	MemoryEdgeDecayEnabled     bool
 	MemoryEdgeFeedbackEnabled  bool
+	EntityLearningEnabled      bool
 	MetricsWindowDays          int
 }
 
@@ -64,6 +66,7 @@ func LoadRuntime() Runtime {
 		MemoryEdgeFeedbackAlpha:    getFloat("SB_MEMORY_EDGE_FEEDBACK_ALPHA", 0.12, 0.0, 1.0),
 		MemoryEdgeFeedbackDecay:    getFloat("SB_MEMORY_EDGE_FEEDBACK_DECAY", 0.05, 0.0, 1.0),
 		MemoryEdgeFeedbackMaxEdges: getInt("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", 10, 0, 500),
+		EntityAutoEdgeMaxPairs:     getInt("SB_ENTITY_AUTOEDGE_MAX_PAIRS", 20, 0, 5_000),
 		TaskPriorityMax:            getInt("SB_TASK_PRIORITY_MAX", 5, 1, 100),
 		SyncFocusNotesLimit:        getInt("SB_SYNC_FOCUS_NOTES_LIMIT", 250, 10, 5000),
 		SyncFocusTasksLimit:        getInt("SB_SYNC_FOCUS_TASKS_LIMIT", 120, 5, 2000),
@@ -76,6 +79,7 @@ func LoadRuntime() Runtime {
 		MemoryEdgeCreateEnabled:    getBool("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", false),
 		MemoryEdgeDecayEnabled:     getBool("SB_FEATURE_MEMORY_EDGE_DECAY", true),
 		MemoryEdgeFeedbackEnabled:  getBool("SB_FEATURE_MEMORY_EDGE_FEEDBACK", true),
+		EntityLearningEnabled:      getBool("SB_FEATURE_ENTITY_LEARNING", true),
 		MetricsWindowDays:          getInt("SB_METRICS_WINDOW_DAYS", 14, 1, 365),
 	}
 }

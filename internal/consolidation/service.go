@@ -220,6 +220,9 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
+			for _, note := range selectNotesByIDs(noteIDs, replayPlan.replayNotes) {
+				_ = s.store.LearnEntitiesFromNote(note, "sleep_consolidation")
+			}
 		}
 	}
 
@@ -536,6 +539,32 @@ func notePairKey(a, b int64) string {
 	return fmt.Sprintf("%d:%d", a, b)
 }
 
+func selectNotesByIDs(noteIDs []int64, notes []model.Note) []model.Note {
+	if len(noteIDs) == 0 || len(notes) == 0 {
+		return nil
+	}
+
+	index := make(map[int64]model.Note, len(notes))
+	for _, note := range notes {
+		index[note.ID] = note
+	}
+
+	selected := make([]model.Note, 0, len(noteIDs))
+	seen := make(map[int64]struct{}, len(noteIDs))
+	for _, id := range noteIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		note, ok := index[id]
+		if !ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		selected = append(selected, note)
+	}
+	return selected
+}
+
 func summarizeSleepPolicyReasons(decisions []sleepPolicyDecision, limit int) []string {
 	if len(decisions) == 0 || limit <= 0 {
 		return nil
@@ -597,6 +626,9 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
+			for _, note := range selectNotesByIDs(noteIDs, sessionNotes) {
+				_ = s.store.LearnEntitiesFromNote(note, "consolidation_apply")
+			}
 		}
 	}
 

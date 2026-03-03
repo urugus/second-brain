@@ -43,6 +43,8 @@ func setupTest(t *testing.T) (*store.Store, *kb.KB) {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "1")
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", "0.12")
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "24")
+	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "1")
+	t.Setenv("SB_ENTITY_AUTOEDGE_MAX_PAIRS", "20")
 
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -872,6 +874,59 @@ func TestApplyAutoLinkDisabled(t *testing.T) {
 	}
 	if containsRelatedNote(fromFirst, n2.ID) {
 		t.Fatalf("did not expect auto-link when feature disabled, got %+v", fromFirst)
+	}
+}
+
+func TestApplyLearnsEntitiesFromMatchedNotes(t *testing.T) {
+	s, k := setupTest(t)
+
+	sess, _ := s.CreateSession("Entity Learning Apply", "")
+	note, _ := s.CreateNote(
+		"Discussed @grace_hopper compiler notes",
+		&sess.ID,
+		[]string{"person:Grace Hopper", "concept:Compiler"},
+		"manual",
+	)
+	s.EndSession(sess.ID, "done")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "entity extraction apply test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "people/grace-hopper.md",
+					Content: "# Grace Hopper\ndiscussed @grace_hopper compiler notes\n",
+					Reason:  "person profile",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if err := svc.Apply(context.Background(), proposed, []int{0}, nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities by note: %v", err)
+	}
+	if len(entities) == 0 {
+		t.Fatal("expected learned entities after apply")
+	}
+	foundPerson := false
+	for _, entity := range entities {
+		if entity.Kind == "person" && strings.Contains(strings.ToLower(entity.CanonicalName), "grace hopper") {
+			foundPerson = true
+			break
+		}
+	}
+	if !foundPerson {
+		t.Fatalf("expected person entity Grace Hopper, got %+v", entities)
 	}
 }
 

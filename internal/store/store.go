@@ -61,6 +61,7 @@ func (s *Store) migrate() error {
 		migrateV6,
 		migrateV7,
 		migrateV8,
+		migrateV9,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -275,6 +276,71 @@ func migrateV8(tx *sql.Tx) error {
 	_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC)`)
 	if err != nil {
 		return fmt.Errorf("exec %q: %w", "CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC)", err)
+	}
+	return nil
+}
+
+func migrateV9(tx *sql.Tx) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS entities (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			kind            TEXT NOT NULL
+			                CHECK (kind IN ('person', 'concept', 'org', 'project', 'unknown')),
+			canonical_name  TEXT NOT NULL,
+			normalized_name TEXT NOT NULL,
+			strength        REAL NOT NULL DEFAULT 0.20 CHECK (strength >= 0 AND strength <= 1),
+			salience        REAL NOT NULL DEFAULT 0.50 CHECK (salience >= 0 AND salience <= 1),
+			status          TEXT NOT NULL DEFAULT 'candidate'
+			                CHECK (status IN ('candidate', 'confirmed', 'rejected', 'archived')),
+			created_at      TEXT NOT NULL,
+			updated_at      TEXT NOT NULL,
+			UNIQUE(kind, normalized_name)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status)`,
+		`CREATE TABLE IF NOT EXISTS entity_aliases (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			entity_id        INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+			alias            TEXT NOT NULL,
+			normalized_alias TEXT NOT NULL,
+			confidence       REAL NOT NULL DEFAULT 0.50 CHECK (confidence >= 0 AND confidence <= 1),
+			source_note_id   INTEGER REFERENCES notes(id) ON DELETE SET NULL,
+			created_at       TEXT NOT NULL,
+			UNIQUE(entity_id, normalized_alias)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_entity_aliases_norm ON entity_aliases(normalized_alias)`,
+		`CREATE TABLE IF NOT EXISTS note_entities (
+			note_id     INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+			entity_id   INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+			confidence  REAL NOT NULL DEFAULT 0.50 CHECK (confidence >= 0 AND confidence <= 1),
+			evidence    TEXT NOT NULL DEFAULT '',
+			source      TEXT NOT NULL DEFAULT '',
+			created_at  TEXT NOT NULL,
+			updated_at  TEXT NOT NULL,
+			UNIQUE(note_id, entity_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_note_entities_note ON note_entities(note_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_note_entities_entity ON note_entities(entity_id)`,
+		`CREATE TABLE IF NOT EXISTS entity_edges (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			from_entity_id   INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+			to_entity_id     INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+			relation_type    TEXT NOT NULL DEFAULT 'associated',
+			weight           REAL NOT NULL DEFAULT 0.10 CHECK (weight > 0 AND weight <= 1),
+			evidence         TEXT NOT NULL DEFAULT '',
+			source_note_id   INTEGER REFERENCES notes(id) ON DELETE SET NULL,
+			reinforced_count INTEGER NOT NULL DEFAULT 1 CHECK (reinforced_count >= 1),
+			created_at       TEXT NOT NULL,
+			updated_at       TEXT NOT NULL,
+			CHECK (from_entity_id <> to_entity_id),
+			UNIQUE(from_entity_id, to_entity_id, relation_type)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_entity_edges_from ON entity_edges(from_entity_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_entity_edges_to ON entity_edges(to_entity_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt[:40], err)
+		}
 	}
 	return nil
 }
