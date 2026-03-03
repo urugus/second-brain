@@ -84,6 +84,56 @@ func TestSyncRun_Success(t *testing.T) {
 	}
 }
 
+func TestSyncRun_AppliesMemoryDecay(t *testing.T) {
+	s := setupTestStore(t)
+
+	note, err := s.CreateNote("decay target from sync run", nil, nil, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	// Seed note timestamps in the past so sync-run decay has measurable effect.
+	if err := s.RecallNote(note.ID, time.Now().UTC().Add(-72*time.Hour), "seed"); err != nil {
+		t.Fatalf("seed historical recall: %v", err)
+	}
+	beforeDecay, err := s.GetNote(note.ID)
+	if err != nil {
+		t.Fatalf("get note before sync run: %v", err)
+	}
+
+	syncResult := SyncResult{
+		Summary:        "Sync with decay",
+		NotesAdded:     0,
+		TasksAdded:     0,
+		KBFilesUpdated: []string{},
+	}
+	envelope := claudeJSONResponse{
+		Type:             "result",
+		StructuredOutput: &syncResult,
+	}
+	envelopeJSON, _ := json.Marshal(envelope)
+
+	svc := NewService(s, &mockExecutor{output: envelopeJSON}, "")
+	result, err := svc.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync run: %v", err)
+	}
+	if result.DecayedNotes < 1 {
+		t.Fatalf("expected at least 1 decayed note, got %d", result.DecayedNotes)
+	}
+
+	afterDecay, err := s.GetNote(note.ID)
+	if err != nil {
+		t.Fatalf("get note after sync run: %v", err)
+	}
+	if afterDecay.Strength >= beforeDecay.Strength {
+		t.Fatalf(
+			"expected note strength to decay during sync run: before=%f after=%f",
+			beforeDecay.Strength,
+			afterDecay.Strength,
+		)
+	}
+}
+
 func TestSyncRun_ClaudeError(t *testing.T) {
 	s := setupTestStore(t)
 

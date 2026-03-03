@@ -39,6 +39,9 @@ and save important information to second-brain.`,
 		fmt.Printf("  Summary: %s\n", result.Summary)
 		fmt.Printf("  Notes added: %d\n", result.NotesAdded)
 		fmt.Printf("  Tasks added: %d\n", result.TasksAdded)
+		if result.DecayedNotes > 0 {
+			fmt.Printf("  Memories decayed: %d notes\n", result.DecayedNotes)
+		}
 		fmt.Printf("  Prediction error: notes %.2f -> %d (%+.2f), tasks %.2f -> %d (%+.2f)\n",
 			result.PredictedNotes, result.NotesAdded, result.NotesError,
 			result.PredictedTasks, result.TasksAdded, result.TasksError,
