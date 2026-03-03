@@ -45,6 +45,10 @@ func setupTest(t *testing.T) (*store.Store, *kb.KB) {
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "24")
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "1")
 	t.Setenv("SB_ENTITY_AUTOEDGE_MAX_PAIRS", "20")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_WEIGHT", "0.14")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MAX_LINKS", "4")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", "1")
+	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "1")
 
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -840,6 +844,7 @@ func TestApplyAutoLinkRespectsGlobalPairCap(t *testing.T) {
 func TestApplyAutoLinkDisabled(t *testing.T) {
 	s, k := setupTest(t)
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "0")
+	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "0")
 
 	sess, _ := s.CreateSession("AutoLink Disabled", "")
 	n1, _ := s.CreateNote("idempotent deployment checklist", &sess.ID, []string{"deploy"}, "manual")

@@ -25,7 +25,23 @@ func (s *Store) LinkNotes(fromNoteID, toNoteID int64, weight float64, evidence s
 	}
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := upsertMemoryEdgeTx(tx, fromNoteID, toNoteID, weight, evidence, nowStr); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit link notes: %w", err)
+	}
+	return nil
+}
+
+func upsertMemoryEdgeTx(tx *sql.Tx, fromNoteID, toNoteID int64, weight float64, evidence string, nowStr string) error {
+	_, err := tx.Exec(
 		`INSERT INTO memory_edges
 			(from_note_id, to_note_id, weight, evidence, reinforced_count, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 1, ?, ?)

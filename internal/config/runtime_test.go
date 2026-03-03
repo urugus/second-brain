@@ -24,6 +24,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "")
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "")
 	t.Setenv("SB_ENTITY_AUTOEDGE_MAX_PAIRS", "")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_WEIGHT", "")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MAX_LINKS", "")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", "")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "")
@@ -37,6 +40,7 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "")
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "")
+	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "")
 
 	cfg := LoadRuntime()
@@ -103,6 +107,15 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if cfg.EntityAutoEdgeMaxPairs != 20 {
 		t.Fatalf("unexpected default entity autoedge max pairs: %d", cfg.EntityAutoEdgeMaxPairs)
 	}
+	if cfg.EntityDerivedEdgeWeight != 0.14 {
+		t.Fatalf("unexpected default entity derived edge weight: %f", cfg.EntityDerivedEdgeWeight)
+	}
+	if cfg.EntityDerivedEdgeMaxLinks != 4 {
+		t.Fatalf("unexpected default entity derived edge max links: %d", cfg.EntityDerivedEdgeMaxLinks)
+	}
+	if cfg.EntityDerivedEdgeMinShared != 1 {
+		t.Fatalf("unexpected default entity derived edge min shared: %d", cfg.EntityDerivedEdgeMinShared)
+	}
 	if cfg.TaskPriorityMax != 5 {
 		t.Fatalf("unexpected default task priority max: %d", cfg.TaskPriorityMax)
 	}
@@ -142,6 +155,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if !cfg.EntityLearningEnabled {
 		t.Fatal("entity learning should default to enabled")
 	}
+	if !cfg.EntityDerivedEdgeEnabled {
+		t.Fatal("entity derived edge should default to enabled")
+	}
 	if cfg.MetricsWindowDays != 14 {
 		t.Fatalf("unexpected default metrics window: %d", cfg.MetricsWindowDays)
 	}
@@ -169,6 +185,9 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "0.11")
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "7")
 	t.Setenv("SB_ENTITY_AUTOEDGE_MAX_PAIRS", "15")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_WEIGHT", "0.18")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MAX_LINKS", "6")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", "2")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "9")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "180")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "90")
@@ -182,6 +201,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "0")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "false")
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "off")
+	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "0")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "30")
 
 	cfg := LoadRuntime()
@@ -206,6 +226,9 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.MemoryEdgeFeedbackDecay != 0.11 ||
 		cfg.MemoryEdgeFeedbackMaxEdges != 7 ||
 		cfg.EntityAutoEdgeMaxPairs != 15 ||
+		cfg.EntityDerivedEdgeWeight != 0.18 ||
+		cfg.EntityDerivedEdgeMaxLinks != 6 ||
+		cfg.EntityDerivedEdgeMinShared != 2 ||
 		cfg.TaskPriorityMax != 9 ||
 		cfg.SyncFocusNotesLimit != 180 ||
 		cfg.SyncFocusTasksLimit != 90 ||
@@ -219,6 +242,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.MemoryEdgeDecayEnabled ||
 		cfg.MemoryEdgeFeedbackEnabled ||
 		cfg.EntityLearningEnabled ||
+		cfg.EntityDerivedEdgeEnabled ||
 		cfg.MetricsWindowDays != 30 {
 		t.Fatalf("unexpected overridden config: %+v", cfg)
 	}

@@ -66,6 +66,13 @@ func (s *Store) LearnEntitiesFromNote(note model.Note, source string) error {
 			return err
 		}
 	}
+	if cfg.EntityDerivedEdgeEnabled &&
+		cfg.EntityDerivedEdgeWeight > 0 &&
+		cfg.EntityDerivedEdgeMaxLinks > 0 {
+		if err := upsertEntityDerivedMemoryEdges(tx, learned, note.ID, nowStr, cfg); err != nil {
+			return err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit entity learning: %w", err)
@@ -311,16 +318,7 @@ func upsertEntityCooccurrenceEdges(tx *sql.Tx, entities []learnedEntity, noteID 
 		return nil
 	}
 
-	byID := make(map[int64]learnedEntity, len(entities))
-	for _, entity := range entities {
-		if existing, ok := byID[entity.ID]; ok {
-			if entity.Confidence > existing.Confidence {
-				byID[entity.ID] = entity
-			}
-			continue
-		}
-		byID[entity.ID] = entity
-	}
+	byID := dedupeLearnedEntities(entities)
 
 	ids := make([]int64, 0, len(byID))
 	for id := range byID {
@@ -355,6 +353,145 @@ func upsertEntityCooccurrenceEdges(tx *sql.Tx, entities []learnedEntity, noteID 
 	}
 
 	return nil
+}
+
+type entityDerivedNoteLink struct {
+	NoteID         int64
+	SharedEntities int
+	Score          float64
+}
+
+func upsertEntityDerivedMemoryEdges(tx *sql.Tx, entities []learnedEntity, sourceNoteID int64, nowStr string, cfg config.Runtime) error {
+	byEntityID := dedupeLearnedEntities(entities)
+	if len(byEntityID) == 0 {
+		return nil
+	}
+
+	entityIDs := make([]int64, 0, len(byEntityID))
+	placeholders := make([]string, 0, len(byEntityID))
+	args := make([]any, 0, len(byEntityID)+1)
+	for entityID := range byEntityID {
+		entityIDs = append(entityIDs, entityID)
+	}
+	sort.Slice(entityIDs, func(i, j int) bool { return entityIDs[i] < entityIDs[j] })
+	for _, entityID := range entityIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, entityID)
+	}
+	args = append(args, sourceNoteID)
+
+	rows, err := tx.Query(
+		fmt.Sprintf(
+			`SELECT note_id, entity_id, confidence
+			 FROM note_entities
+			 WHERE entity_id IN (%s) AND note_id <> ?`,
+			strings.Join(placeholders, ","),
+		),
+		args...,
+	)
+	if err != nil {
+		return fmt.Errorf("query entity-derived memory edge candidates: %w", err)
+	}
+	defer rows.Close()
+
+	type aggregate struct {
+		score  float64
+		shared map[int64]struct{}
+	}
+	aggregates := map[int64]*aggregate{}
+	for rows.Next() {
+		var (
+			noteID     int64
+			entityID   int64
+			confidence float64
+		)
+		if err := rows.Scan(&noteID, &entityID, &confidence); err != nil {
+			return fmt.Errorf("scan entity-derived memory edge candidate: %w", err)
+		}
+
+		sourceEntity, ok := byEntityID[entityID]
+		if !ok {
+			continue
+		}
+		a, ok := aggregates[noteID]
+		if !ok {
+			a = &aggregate{shared: map[int64]struct{}{}}
+			aggregates[noteID] = a
+		}
+		if _, seen := a.shared[entityID]; seen {
+			continue
+		}
+		a.shared[entityID] = struct{}{}
+		a.score += clamp(sourceEntity.Confidence*confidence, 0, 1)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate entity-derived memory edge candidates: %w", err)
+	}
+
+	minShared := cfg.EntityDerivedEdgeMinShared
+	if minShared <= 0 {
+		minShared = 1
+	}
+
+	ranked := make([]entityDerivedNoteLink, 0, len(aggregates))
+	for noteID, a := range aggregates {
+		sharedCount := len(a.shared)
+		if sharedCount < minShared {
+			continue
+		}
+		score := clamp(a.score/float64(sharedCount), 0, 1)
+		if score <= 0 {
+			continue
+		}
+		ranked = append(ranked, entityDerivedNoteLink{
+			NoteID:         noteID,
+			SharedEntities: sharedCount,
+			Score:          score,
+		})
+	}
+	if len(ranked) == 0 {
+		return nil
+	}
+
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].SharedEntities == ranked[j].SharedEntities {
+			if ranked[i].Score == ranked[j].Score {
+				return ranked[i].NoteID < ranked[j].NoteID
+			}
+			return ranked[i].Score > ranked[j].Score
+		}
+		return ranked[i].SharedEntities > ranked[j].SharedEntities
+	})
+	if len(ranked) > cfg.EntityDerivedEdgeMaxLinks {
+		ranked = ranked[:cfg.EntityDerivedEdgeMaxLinks]
+	}
+
+	for _, item := range ranked {
+		weight := clamp(cfg.EntityDerivedEdgeWeight*item.Score, minEdgeWeightEpsilon, 1)
+		evidence := fmt.Sprintf("auto:entity-shared shared=%d score=%.2f", item.SharedEntities, item.Score)
+		if err := upsertMemoryEdgeTx(tx, sourceNoteID, item.NoteID, weight, evidence, nowStr); err != nil {
+			return err
+		}
+		if err := upsertMemoryEdgeTx(tx, item.NoteID, sourceNoteID, weight, evidence, nowStr); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func dedupeLearnedEntities(entities []learnedEntity) map[int64]learnedEntity {
+	byID := make(map[int64]learnedEntity, len(entities))
+	for _, entity := range entities {
+		if existing, ok := byID[entity.ID]; ok {
+			if entity.Confidence > existing.Confidence {
+				byID[entity.ID] = entity
+			}
+			continue
+		}
+		byID[entity.ID] = entity
+	}
+	return byID
 }
 
 func upsertEntityEdge(tx *sql.Tx, fromID, toID int64, relationType string, weight float64, evidence string, sourceNoteID int64, nowStr string) error {
