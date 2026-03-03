@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,9 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "0.05")
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "10")
 	t.Setenv("SB_ENTITY_AUTOEDGE_MAX_PAIRS", "20")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_WEIGHT", "0.14")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MAX_LINKS", "4")
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", "1")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
@@ -32,6 +36,7 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "0")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "1")
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "1")
+	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "1")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "14")
 
 	dir := t.TempDir()
@@ -860,6 +865,156 @@ func TestLearnEntitiesFromNoteRespectsFeatureFlag(t *testing.T) {
 	}
 	if len(entities) != 0 {
 		t.Fatalf("expected no entities when feature disabled, got %+v", entities)
+	}
+}
+
+func TestLearnEntitiesFromNoteCreatesEntityDerivedMemoryEdges(t *testing.T) {
+	s := setupTestStore(t)
+
+	anchor, err := s.CreateNote(
+		"Grace Hopper compiler retrospective",
+		nil,
+		[]string{"person:Grace Hopper", "concept:Compiler"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create anchor note: %v", err)
+	}
+	unrelated, err := s.CreateNote(
+		"Typography and spacing guideline",
+		nil,
+		[]string{"concept:Design"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create unrelated note: %v", err)
+	}
+	target, err := s.CreateNote(
+		"Grace Hopper COBOL compiler memo",
+		nil,
+		[]string{"person:Grace Hopper", "concept:COBOL"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create target note: %v", err)
+	}
+
+	if err := s.LearnEntitiesFromNote(*anchor, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for anchor: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*unrelated, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for unrelated: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*target, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for target: %v", err)
+	}
+
+	var (
+		weight   float64
+		evidence string
+	)
+	if err := s.db.QueryRow(
+		`SELECT weight, evidence FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		target.ID, anchor.ID,
+	).Scan(&weight, &evidence); err != nil {
+		t.Fatalf("query entity-derived edge target->anchor: %v", err)
+	}
+	if weight <= 0 {
+		t.Fatalf("expected positive entity-derived edge weight, got %f", weight)
+	}
+	if !strings.HasPrefix(evidence, "auto:entity-shared") {
+		t.Fatalf("expected entity-derived edge evidence prefix, got %q", evidence)
+	}
+	if err := s.db.QueryRow(
+		`SELECT weight, evidence FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		anchor.ID, target.ID,
+	).Scan(&weight, &evidence); err != nil {
+		t.Fatalf("query entity-derived edge anchor->target: %v", err)
+	}
+	if weight <= 0 {
+		t.Fatalf("expected positive reverse entity-derived edge weight, got %f", weight)
+	}
+
+	var count int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		target.ID, unrelated.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count target->unrelated edge: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("did not expect unrelated entity-derived edge, count=%d", count)
+	}
+}
+
+func TestLearnEntitiesFromNoteEntityDerivedEdgesRespectMinShared(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", "2")
+
+	anchor, err := s.CreateNote(
+		"Grace Hopper compiler notes",
+		nil,
+		[]string{"person:Grace Hopper", "concept:Compiler"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create anchor note: %v", err)
+	}
+	target, err := s.CreateNote(
+		"Grace Hopper onboarding memo",
+		nil,
+		[]string{"person:Grace Hopper"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create target note: %v", err)
+	}
+
+	if err := s.LearnEntitiesFromNote(*anchor, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for anchor: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*target, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for target: %v", err)
+	}
+
+	var count int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		target.ID, anchor.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count target->anchor edge: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no entity-derived edge with shared entity below threshold, count=%d", count)
+	}
+}
+
+func TestLearnEntitiesFromNoteEntityDerivedEdgesRespectFeatureFlag(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "0")
+
+	anchor, err := s.CreateNote("Grace Hopper compiler", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create anchor note: %v", err)
+	}
+	target, err := s.CreateNote("Grace Hopper memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create target note: %v", err)
+	}
+
+	if err := s.LearnEntitiesFromNote(*anchor, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for anchor: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*target, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities for target: %v", err)
+	}
+
+	var edgeCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM memory_edges`).Scan(&edgeCount); err != nil {
+		t.Fatalf("count memory edges: %v", err)
+	}
+	if edgeCount != 0 {
+		t.Fatalf("expected no memory edge when entity-derived edge feature disabled, got %d", edgeCount)
 	}
 }
 
