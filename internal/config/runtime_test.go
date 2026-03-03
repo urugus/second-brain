@@ -12,6 +12,8 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "")
 	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "")
 	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "")
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", "")
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "")
@@ -20,6 +22,7 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_FEATURE_PREDICTION_LEARNING", "")
 	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "")
 	t.Setenv("SB_FEATURE_SYNC_FOCUS_LEARNING", "")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "")
 
 	cfg := LoadRuntime()
@@ -50,6 +53,12 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if cfg.SleepDuplicateReplayWeight != 0.35 {
 		t.Fatalf("unexpected default duplicate replay weight: %f", cfg.SleepDuplicateReplayWeight)
 	}
+	if cfg.MemoryEdgeAutoLinkWeight != 0.12 {
+		t.Fatalf("unexpected default memory edge autolink weight: %f", cfg.MemoryEdgeAutoLinkWeight)
+	}
+	if cfg.MemoryEdgeAutoLinkMaxPairs != 24 {
+		t.Fatalf("unexpected default memory edge autolink max pairs: %d", cfg.MemoryEdgeAutoLinkMaxPairs)
+	}
 	if cfg.TaskPriorityMax != 5 {
 		t.Fatalf("unexpected default task priority max: %d", cfg.TaskPriorityMax)
 	}
@@ -74,6 +83,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if !cfg.SyncFocusLearningEnabled {
 		t.Fatal("sync focus learning should default to enabled")
 	}
+	if !cfg.MemoryEdgeAutoLinkEnabled {
+		t.Fatal("memory edge autolink should default to enabled")
+	}
 	if cfg.MetricsWindowDays != 14 {
 		t.Fatalf("unexpected default metrics window: %d", cfg.MetricsWindowDays)
 	}
@@ -89,6 +101,8 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "3")
 	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "0.2")
 	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "0.4")
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", "0.19")
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "8")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "9")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "180")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "90")
@@ -97,6 +111,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_FEATURE_PREDICTION_LEARNING", "false")
 	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "0")
 	t.Setenv("SB_FEATURE_SYNC_FOCUS_LEARNING", "off")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "false")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "30")
 
 	cfg := LoadRuntime()
@@ -109,6 +124,8 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.PriorityAdjustLimit != 3 ||
 		cfg.SleepReplayAlpha != 0.2 ||
 		cfg.SleepDuplicateReplayWeight != 0.4 ||
+		cfg.MemoryEdgeAutoLinkWeight != 0.19 ||
+		cfg.MemoryEdgeAutoLinkMaxPairs != 8 ||
 		cfg.TaskPriorityMax != 9 ||
 		cfg.SyncFocusNotesLimit != 180 ||
 		cfg.SyncFocusTasksLimit != 90 ||
@@ -117,6 +134,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.PredictionLearningEnabled ||
 		cfg.SleepReplayEnabled ||
 		cfg.SyncFocusLearningEnabled ||
+		cfg.MemoryEdgeAutoLinkEnabled ||
 		cfg.MetricsWindowDays != 30 {
 		t.Fatalf("unexpected overridden config: %+v", cfg)
 	}
