@@ -184,6 +184,7 @@ sb consolidate
 |---------|-------------|-------|
 | `entity list` | List learned entities | `--note`, `--kind`, `--status`, `--limit` |
 | `entity show <id>` | Show one learned entity | |
+| `entity set-status <id> <status>` | Update entity status | |
 
 ### kb
 
