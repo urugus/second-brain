@@ -29,6 +29,9 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_ENTITY_DERIVED_EDGE_WEIGHT", "0.14")
 	t.Setenv("SB_ENTITY_DERIVED_EDGE_MAX_LINKS", "4")
 	t.Setenv("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", "1")
+	t.Setenv("SB_ENTITY_FEEDBACK_ALPHA", "0.10")
+	t.Setenv("SB_ENTITY_FEEDBACK_DECAY", "0.04")
+	t.Setenv("SB_ENTITY_FEEDBACK_MAX_ENTITIES", "10")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
@@ -37,6 +40,7 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "1")
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "1")
 	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "1")
+	t.Setenv("SB_FEATURE_ENTITY_FEEDBACK", "1")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "14")
 
 	dir := t.TempDir()
@@ -393,6 +397,147 @@ func TestRecallNote_FeedbackLearningDisabled(t *testing.T) {
 	}
 	if reinforced != 1 {
 		t.Fatalf("expected unchanged reinforced_count when feedback disabled, got %d", reinforced)
+	}
+}
+
+func TestRecallNote_EntityFeedbackReinforcesMatchedEntities(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_FEEDBACK_ALPHA", "0.20")
+
+	note, err := s.CreateNote(
+		"Grace Hopper compiler retrospective",
+		nil,
+		[]string{"person:Grace Hopper", "concept:Compiler"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+
+	beforeEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before recall: %v", err)
+	}
+	beforePerson, ok := findEntityByKindAndName(beforeEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("person entity not found before recall: %+v", beforeEntities)
+	}
+
+	if err := s.RecallNote(note.ID, time.Now().UTC(), "grace hopper compiler memo"); err != nil {
+		t.Fatalf("recall note: %v", err)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after recall: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("person entity not found after recall: %+v", afterEntities)
+	}
+
+	if afterPerson.Strength <= beforePerson.Strength {
+		t.Fatalf("expected person strength reinforcement, before=%f after=%f", beforePerson.Strength, afterPerson.Strength)
+	}
+	if afterPerson.Salience <= beforePerson.Salience {
+		t.Fatalf("expected person salience reinforcement, before=%f after=%f", beforePerson.Salience, afterPerson.Salience)
+	}
+}
+
+func TestRecallNote_EntityFeedbackDecaysUnmatchedEntities(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_FEEDBACK_DECAY", "0.20")
+
+	note, err := s.CreateNote(
+		"Grace Hopper compiler retrospective",
+		nil,
+		[]string{"person:Grace Hopper"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+
+	beforeEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before recall: %v", err)
+	}
+	beforePerson, ok := findEntityByKindAndName(beforeEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("person entity not found before recall: %+v", beforeEntities)
+	}
+
+	if err := s.RecallNote(note.ID, time.Now().UTC(), "design token typography"); err != nil {
+		t.Fatalf("recall note: %v", err)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after recall: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("person entity not found after recall: %+v", afterEntities)
+	}
+
+	if afterPerson.Strength >= beforePerson.Strength {
+		t.Fatalf("expected person strength decay on mismatch, before=%f after=%f", beforePerson.Strength, afterPerson.Strength)
+	}
+	if afterPerson.Strength < minStrength {
+		t.Fatalf("expected person strength floor >= %f, got %f", minStrength, afterPerson.Strength)
+	}
+}
+
+func TestRecallNote_EntityFeedbackDisabled(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_ENTITY_FEEDBACK", "0")
+
+	note, err := s.CreateNote(
+		"Grace Hopper compiler retrospective",
+		nil,
+		[]string{"person:Grace Hopper"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+
+	beforeEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before recall: %v", err)
+	}
+	beforePerson, ok := findEntityByKindAndName(beforeEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("person entity not found before recall: %+v", beforeEntities)
+	}
+
+	if err := s.RecallNote(note.ID, time.Now().UTC(), "grace hopper compiler"); err != nil {
+		t.Fatalf("recall note: %v", err)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after recall: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("person entity not found after recall: %+v", afterEntities)
+	}
+
+	if !almostEqual(beforePerson.Strength, afterPerson.Strength) {
+		t.Fatalf("expected unchanged entity strength when feedback disabled, before=%f after=%f", beforePerson.Strength, afterPerson.Strength)
+	}
+	if !almostEqual(beforePerson.Salience, afterPerson.Salience) {
+		t.Fatalf("expected unchanged entity salience when feedback disabled, before=%f after=%f", beforePerson.Salience, afterPerson.Salience)
 	}
 }
 
@@ -1630,6 +1775,21 @@ func hasRelatedNoteID(related []model.RelatedNote, noteID int64) bool {
 		}
 	}
 	return false
+}
+
+func findEntityByKindAndName(entities []model.Entity, kind string, needle string) (model.Entity, bool) {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	for _, entity := range entities {
+		if strings.ToLower(entity.Kind) != kind {
+			continue
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(entity.CanonicalName), needle) {
+			continue
+		}
+		return entity, true
+	}
+	return model.Entity{}, false
 }
 
 func almostEqual(a, b float64) bool {

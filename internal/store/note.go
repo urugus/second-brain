@@ -238,6 +238,9 @@ func (s *Store) RecallNote(id int64, now time.Time, context string) error {
 	if err := s.applyRecallEdgeFeedback(tx, id, context, nowStr, runtimeCfg); err != nil {
 		return fmt.Errorf("apply recall edge feedback: %w", err)
 	}
+	if err := s.applyRecallEntityFeedback(tx, id, context, nowStr, runtimeCfg); err != nil {
+		return fmt.Errorf("apply recall entity feedback: %w", err)
+	}
 
 	return tx.Commit()
 }
@@ -333,6 +336,101 @@ func (s *Store) applyRecallEdgeFeedback(tx *sql.Tx, noteID int64, context string
 	return nil
 }
 
+func (s *Store) applyRecallEntityFeedback(tx *sql.Tx, noteID int64, context string, nowStr string, cfg config.Runtime) error {
+	if !cfg.EntityFeedbackEnabled || cfg.EntityFeedbackMaxEntities <= 0 {
+		return nil
+	}
+	terms := tokenizeContextTerms(context)
+	if len(terms) == 0 {
+		return nil
+	}
+
+	rows, err := tx.Query(
+		`SELECT e.id, e.canonical_name, e.strength, e.salience, e.status
+		 FROM note_entities ne
+		 JOIN entities e ON e.id = ne.entity_id
+		 WHERE ne.note_id = ?
+		 ORDER BY ne.confidence DESC, e.salience DESC
+		 LIMIT ?`,
+		noteID,
+		cfg.EntityFeedbackMaxEntities,
+	)
+	if err != nil {
+		return fmt.Errorf("query entity feedback candidates: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			entityID      int64
+			canonicalName string
+			strength      float64
+			salience      float64
+			status        string
+		)
+		if err := rows.Scan(&entityID, &canonicalName, &strength, &salience, &status); err != nil {
+			return fmt.Errorf("scan entity feedback candidate: %w", err)
+		}
+
+		matchRatio := recallEntityMatchRatio(terms, canonicalName)
+		if matchRatio > 0 && cfg.EntityFeedbackAlpha > 0 {
+			newStrength := clamp(strength+(cfg.EntityFeedbackAlpha*matchRatio*(1-strength)), 0, 1)
+			newSalience := clamp(salience+((cfg.EntityFeedbackAlpha*0.60)*matchRatio*(1-salience)), 0, 1)
+
+			newStatus := status
+			if status == "candidate" && newStrength >= 0.65 {
+				newStatus = "confirmed"
+			}
+
+			_, err := tx.Exec(
+				`UPDATE entities
+				 SET strength = ?, salience = ?, status = ?, updated_at = ?
+				 WHERE id = ?`,
+				newStrength,
+				newSalience,
+				newStatus,
+				nowStr,
+				entityID,
+			)
+			if err != nil {
+				return fmt.Errorf("update reinforced feedback entity: %w", err)
+			}
+			continue
+		}
+
+		if matchRatio == 0 && cfg.EntityFeedbackDecay > 0 {
+			newStrength := strength * (1 - cfg.EntityFeedbackDecay)
+			if newStrength < minStrength {
+				newStrength = minStrength
+			}
+			newSalience := salience * (1 - (cfg.EntityFeedbackDecay * 0.5))
+			if newSalience < 0.20 {
+				newSalience = 0.20
+			}
+			if math.Abs(newStrength-strength) < 1e-9 && math.Abs(newSalience-salience) < 1e-9 {
+				continue
+			}
+
+			_, err := tx.Exec(
+				`UPDATE entities
+				 SET strength = ?, salience = ?, updated_at = ?
+				 WHERE id = ?`,
+				newStrength,
+				newSalience,
+				nowStr,
+				entityID,
+			)
+			if err != nil {
+				return fmt.Errorf("update decayed feedback entity: %w", err)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate entity feedback candidates: %w", err)
+	}
+	return nil
+}
+
 func recallContextBoost(context, content, tags string) float64 {
 	terms := tokenizeContextTerms(context)
 	if len(terms) == 0 {
@@ -371,6 +469,27 @@ func recallContextMatchRatio(terms []string, content, tags string) float64 {
 	matched := 0
 	for _, term := range terms {
 		if strings.Contains(noteText, term) {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return 0
+	}
+	return float64(matched) / float64(len(terms))
+}
+
+func recallEntityMatchRatio(terms []string, canonicalName string) float64 {
+	if len(terms) == 0 {
+		return 0
+	}
+	entityText := normalizeContextText(canonicalName)
+	if entityText == "" {
+		return 0
+	}
+
+	matched := 0
+	for _, term := range terms {
+		if strings.Contains(entityText, term) {
 			matched++
 		}
 	}

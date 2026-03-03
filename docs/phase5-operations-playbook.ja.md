@@ -40,6 +40,9 @@ sb sync metrics --days 14
 | `SB_ENTITY_DERIVED_EDGE_WEIGHT` | `0.14` | entity 共有に基づく note 間 auto-link 重み係数 |
 | `SB_ENTITY_DERIVED_EDGE_MAX_LINKS` | `4` | note 1件学習あたりに付与する entity 由来 link 上限 |
 | `SB_ENTITY_DERIVED_EDGE_MIN_SHARED` | `1` | entity 由来 link を張るための最小共有 entity 数 |
+| `SB_ENTITY_FEEDBACK_ALPHA` | `0.10` | recall 時の context 一致 entity 強化係数 |
+| `SB_ENTITY_FEEDBACK_DECAY` | `0.04` | recall 時の context 不一致 entity 減衰率 |
+| `SB_ENTITY_FEEDBACK_MAX_ENTITIES` | `10` | recall 1回でフィードバック更新する entity 数上限 |
 | `SB_METRICS_WINDOW_DAYS` | `14` | `sync metrics` の既定集計期間 |
 
 ## 3. Feature Flag とロールバック
@@ -56,6 +59,7 @@ sb sync metrics --days 14
 | `SB_FEATURE_MEMORY_EDGE_FEEDBACK` | `1` | recall 時の memory edge フィードバック学習を停止 |
 | `SB_FEATURE_ENTITY_LEARNING` | `1` | consolidation 時の entity 派生学習を停止 |
 | `SB_FEATURE_ENTITY_DERIVED_EDGE` | `1` | entity 共有ベースの note 間 auto-link を停止 |
+| `SB_FEATURE_ENTITY_FEEDBACK` | `1` | recall 時の entity フィードバック学習を停止 |
 
 ### 緊急ロールバック手順
 1. 実行環境で以下を設定する。
@@ -67,6 +71,7 @@ sb sync metrics --days 14
    - `SB_FEATURE_MEMORY_EDGE_FEEDBACK=0`
    - `SB_FEATURE_ENTITY_LEARNING=0`
    - `SB_FEATURE_ENTITY_DERIVED_EDGE=0`
+   - `SB_FEATURE_ENTITY_FEEDBACK=0`
 2. `sb sync run` を 1 回実行し、処理が継続可能か確認する。
 3. `sb sync metrics --days 7` で KPI の急変有無を確認する。
 4. 必要に応じてパラメータを段階的に戻し、feature flag を再有効化する。
