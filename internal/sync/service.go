@@ -21,6 +21,7 @@ type SyncResult struct {
 	KBFilesUpdated []string `json:"kb_files_updated"`
 
 	DecayedNotes   int     `json:"-"`
+	DecayedEdges   int     `json:"-"`
 	PredictedNotes float64 `json:"-"`
 	PredictedTasks float64 `json:"-"`
 	NotesError     float64 `json:"-"`
@@ -55,9 +56,14 @@ func NewService(s *store.Store, executor adapter.CommandExecutor, modelName stri
 // Run executes a single sync: call claude -p with MCP tools, parse result, log.
 func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	runtimeCfg := config.LoadRuntime()
-	decayedNotes, err := s.store.DecayMemories(time.Now().UTC())
+	now := time.Now().UTC()
+	decayedNotes, err := s.store.DecayMemories(now)
 	if err != nil {
 		return nil, fmt.Errorf("decay memories: %w", err)
+	}
+	decayedEdges, err := s.store.DecayMemoryEdges(now)
+	if err != nil {
+		return nil, fmt.Errorf("decay memory edges: %w", err)
 	}
 	profile := s.buildSyncFocusProfile(runtimeCfg)
 	prompt := buildSyncPrompt(profile)
@@ -103,6 +109,7 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 		return nil, err
 	}
 	result.DecayedNotes = decayedNotes
+	result.DecayedEdges = decayedEdges
 	result.PredictedNotes = predictedNotes
 	result.PredictedTasks = predictedTasks
 	result.NotesError = float64(result.NotesAdded) - predictedNotes
