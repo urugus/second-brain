@@ -151,7 +151,8 @@ var noteRecallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := appStore.RecallNote(id, time.Now().UTC(), "cli"); err != nil {
+		context, _ := cmd.Flags().GetString("context")
+		if err := appStore.RecallNote(id, time.Now().UTC(), context); err != nil {
 			return err
 		}
 		after, err := appStore.GetNote(id)
@@ -237,6 +238,7 @@ func init() {
 	noteListCmd.Flags().String("tag", "", "Filter by tag")
 	noteRelatedCmd.Flags().Int("depth", 1, "Traversal depth for related notes")
 	noteRelatedCmd.Flags().Int("limit", 10, "Maximum number of related notes")
+	noteRecallCmd.Flags().String("context", "", "Optional recall context for feedback learning")
 	noteLinkCmd.Flags().Float64("weight", 0.5, "Edge weight in (0,1]")
 	noteLinkCmd.Flags().String("evidence", "", "Evidence or reason for this link")
 
