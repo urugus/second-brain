@@ -484,13 +484,12 @@ func (s *Service) autoLinkNotesForKBUpdate(noteIDs []int64, kbPath string, cfg c
 	}
 
 	evidence := fmt.Sprintf("auto:kb-cooccurrence:%s", kbPath)
-	linked := 0
 	for i := 0; i < len(uniqueNoteIDs); i++ {
-		if linked >= cfg.MemoryEdgeAutoLinkMaxPairs {
+		if len(linkedPairs) >= cfg.MemoryEdgeAutoLinkMaxPairs {
 			break
 		}
 		for j := i + 1; j < len(uniqueNoteIDs); j++ {
-			if linked >= cfg.MemoryEdgeAutoLinkMaxPairs {
+			if len(linkedPairs) >= cfg.MemoryEdgeAutoLinkMaxPairs {
 				break
 			}
 			a := uniqueNoteIDs[i]
@@ -508,7 +507,6 @@ func (s *Service) autoLinkNotesForKBUpdate(noteIDs []int64, kbPath string, cfg c
 			}
 
 			linkedPairs[key] = struct{}{}
-			linked++
 		}
 	}
 }

@@ -778,6 +778,63 @@ func TestApplyAutoLinksCooccurredNotes(t *testing.T) {
 	}
 }
 
+func TestApplyAutoLinkRespectsGlobalPairCap(t *testing.T) {
+	s, k := setupTest(t)
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "1")
+
+	sess, _ := s.CreateSession("AutoLink Cap", "")
+	n1, _ := s.CreateNote("cap note one", &sess.ID, nil, "manual")
+	n2, _ := s.CreateNote("cap note two", &sess.ID, nil, "manual")
+	n3, _ := s.CreateNote("cap note three", &sess.ID, nil, "manual")
+	s.EndSession(sess.ID, "done")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "apply autolink cap test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "apply/cap-a.md",
+					Content: "# Cap A\ncap note one\ncap note two\ncap note three\n",
+					Reason:  "cap coverage a",
+				},
+				{
+					Path:    "apply/cap-b.md",
+					Content: "# Cap B\ncap note one\ncap note two\ncap note three\n",
+					Reason:  "cap coverage b",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if err := svc.Apply(context.Background(), proposed, []int{0, 1}, nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	fromFirst, err := s.RelatedNotes(n1.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n1: %v", err)
+	}
+	if !containsRelatedNote(fromFirst, n2.ID) {
+		t.Fatalf("expected capped pair n1<->n2 to exist, got %+v", fromFirst)
+	}
+	if containsRelatedNote(fromFirst, n3.ID) {
+		t.Fatalf("did not expect capped run to link n1->n3, got %+v", fromFirst)
+	}
+
+	fromThird, err := s.RelatedNotes(n3.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n3: %v", err)
+	}
+	if len(fromThird) != 0 {
+		t.Fatalf("did not expect note %d to be linked when cap=1, got %+v", n3.ID, fromThird)
+	}
+}
+
 func TestApplyAutoLinkDisabled(t *testing.T) {
 	s, k := setupTest(t)
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "0")
