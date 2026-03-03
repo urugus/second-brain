@@ -1323,6 +1323,60 @@ func TestDecayEntitiesDisabled(t *testing.T) {
 	}
 }
 
+func TestDecayEntitiesDoesNotIncreaseWeakValues(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_DECAY_RATE", "1.0")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.10")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.20")
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before decay: %v", err)
+	}
+	person, ok := findEntityByKindAndName(entities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity before decay, got %+v", entities)
+	}
+
+	base := time.Now().UTC().Add(-240 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE entities SET strength = ?, salience = ?, updated_at = ? WHERE id = ?`,
+		0.08, 0.18, base, person.ID,
+	); err != nil {
+		t.Fatalf("seed weak entity state: %v", err)
+	}
+
+	affected, err := s.DecayEntities(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay entities: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("expected no affected entity when values are already below floor, got %d", affected)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after decay: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity after decay, got %+v", afterEntities)
+	}
+	if !almostEqual(afterPerson.Strength, 0.08) {
+		t.Fatalf("expected no strength increase during decay, got %f", afterPerson.Strength)
+	}
+	if !almostEqual(afterPerson.Salience, 0.18) {
+		t.Fatalf("expected no salience increase during decay, got %f", afterPerson.Salience)
+	}
+}
+
 func TestRelatedNotes(t *testing.T) {
 	s := setupTestStore(t)
 	a, _ := s.CreateNote("Seed", nil, nil, "")

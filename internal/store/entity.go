@@ -168,13 +168,21 @@ func (s *Store) DecayEntities(now time.Time) (int, error) {
 		}
 
 		newStrength := strength * math.Exp(-cfg.EntityDecayRate*dtDays)
-		if newStrength < cfg.EntityMinStrength {
-			newStrength = cfg.EntityMinStrength
+		strengthFloor := cfg.EntityMinStrength
+		if strengthFloor > strength {
+			strengthFloor = strength
+		}
+		if newStrength < strengthFloor {
+			newStrength = strengthFloor
 		}
 
 		newSalience := salience * math.Exp(-(cfg.EntityDecayRate*0.70)*dtDays)
-		if newSalience < cfg.EntityMinSalience {
-			newSalience = cfg.EntityMinSalience
+		salienceFloor := cfg.EntityMinSalience
+		if salienceFloor > salience {
+			salienceFloor = salience
+		}
+		if newSalience < salienceFloor {
+			newSalience = salienceFloor
 		}
 
 		newStatus := status
