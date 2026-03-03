@@ -24,12 +24,14 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_ALPHA", "0.12")
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "0.05")
 	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "10")
+	t.Setenv("SB_ENTITY_AUTOEDGE_MAX_PAIRS", "20")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
 	t.Setenv("SB_SLEEP_THRESHOLD", "10")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "0")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "1")
+	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "1")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "14")
 
 	dir := t.TempDir()
@@ -111,8 +113,8 @@ func TestMigrateFromV3ToLatestBackfillsDefaults(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 8 {
-		t.Fatalf("expected schema version 8, got %d", version)
+	if version != 9 {
+		t.Fatalf("expected schema version 9, got %d", version)
 	}
 
 	var strength, decayRate, salience float64
@@ -175,6 +177,20 @@ func TestMigrateV8CreatesNotesCreatedAtIndex(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("expected idx_notes_created_at index to exist")
+	}
+}
+
+func TestMigrateV9CreatesEntityTables(t *testing.T) {
+	s := setupTestStore(t)
+
+	for _, table := range []string{"entities", "entity_aliases", "note_entities", "entity_edges"} {
+		exists, err := tableExists(s.db, table)
+		if err != nil {
+			t.Fatalf("check %s exists: %v", table, err)
+		}
+		if !exists {
+			t.Fatalf("expected %s table to exist", table)
+		}
 	}
 }
 
@@ -775,6 +791,75 @@ func TestCreateNoteAutoLinkRespectsMaxLinks(t *testing.T) {
 	target := related[0].Note.ID
 	if target != c1.ID && target != c2.ID && target != c3.ID {
 		t.Fatalf("unexpected auto-link target: %d", target)
+	}
+}
+
+func TestLearnEntitiesFromNote(t *testing.T) {
+	s := setupTestStore(t)
+
+	note, err := s.CreateNote(
+		"Discussed @grace_hopper and #compiler strategy",
+		nil,
+		[]string{"person:Grace Hopper", "concept:Compiler", "org:navy"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities from note: %v", err)
+	}
+
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities by note: %v", err)
+	}
+	if len(entities) < 3 {
+		t.Fatalf("expected at least 3 learned entities, got %d (%+v)", len(entities), entities)
+	}
+
+	kinds := map[string]int{}
+	for _, entity := range entities {
+		kinds[entity.Kind]++
+	}
+	if kinds["person"] == 0 {
+		t.Fatalf("expected at least one person entity, got %+v", kinds)
+	}
+	if kinds["concept"] == 0 {
+		t.Fatalf("expected at least one concept entity, got %+v", kinds)
+	}
+	if kinds["org"] == 0 {
+		t.Fatalf("expected at least one org entity, got %+v", kinds)
+	}
+
+	var edgeCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM entity_edges`).Scan(&edgeCount); err != nil {
+		t.Fatalf("count entity_edges: %v", err)
+	}
+	if edgeCount == 0 {
+		t.Fatal("expected entity cooccurrence edges to be created")
+	}
+}
+
+func TestLearnEntitiesFromNoteRespectsFeatureFlag(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "0")
+
+	note, err := s.CreateNote("Person tag only", nil, []string{"person:Alan Turing"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities from note: %v", err)
+	}
+
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities by note: %v", err)
+	}
+	if len(entities) != 0 {
+		t.Fatalf("expected no entities when feature disabled, got %+v", entities)
 	}
 }
 
