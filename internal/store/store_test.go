@@ -1163,6 +1163,220 @@ func TestLearnEntitiesFromNoteEntityDerivedEdgesRespectFeatureFlag(t *testing.T)
 	}
 }
 
+func TestDecayEntities(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_DECAY_RATE", "1.0")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.10")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.20")
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before decay: %v", err)
+	}
+	person, ok := findEntityByKindAndName(entities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity before decay, got %+v", entities)
+	}
+
+	base := time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE entities SET strength = ?, salience = ?, status = 'confirmed', updated_at = ? WHERE id = ?`,
+		0.90, 0.90, base, person.ID,
+	); err != nil {
+		t.Fatalf("seed entity state: %v", err)
+	}
+
+	affected, err := s.DecayEntities(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay entities: %v", err)
+	}
+	if affected < 1 {
+		t.Fatalf("expected at least 1 decayed entity, got %d", affected)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after decay: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity after decay, got %+v", afterEntities)
+	}
+	if afterPerson.Strength >= 0.90 {
+		t.Fatalf("expected decayed entity strength, got %f", afterPerson.Strength)
+	}
+	if afterPerson.Salience >= 0.90 {
+		t.Fatalf("expected decayed entity salience, got %f", afterPerson.Salience)
+	}
+	if afterPerson.Status != "candidate" {
+		t.Fatalf("expected confirmed entity to demote to candidate, got %s", afterPerson.Status)
+	}
+}
+
+func TestDecayEntitiesRespectsMinimums(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_DECAY_RATE", "1.0")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.25")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.35")
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before decay: %v", err)
+	}
+	person, ok := findEntityByKindAndName(entities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity before decay, got %+v", entities)
+	}
+
+	base := time.Now().UTC().Add(-240 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE entities SET strength = ?, salience = ?, updated_at = ? WHERE id = ?`,
+		0.30, 0.40, base, person.ID,
+	); err != nil {
+		t.Fatalf("seed entity state: %v", err)
+	}
+
+	if _, err := s.DecayEntities(time.Now().UTC()); err != nil {
+		t.Fatalf("decay entities: %v", err)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after decay: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity after decay, got %+v", afterEntities)
+	}
+	if afterPerson.Strength < 0.25 {
+		t.Fatalf("expected strength floor 0.25, got %f", afterPerson.Strength)
+	}
+	if afterPerson.Salience < 0.35 {
+		t.Fatalf("expected salience floor 0.35, got %f", afterPerson.Salience)
+	}
+}
+
+func TestDecayEntitiesDisabled(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_ENTITY_DECAY", "0")
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before decay: %v", err)
+	}
+	person, ok := findEntityByKindAndName(entities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity before decay, got %+v", entities)
+	}
+
+	base := time.Now().UTC().Add(-240 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE entities SET strength = ?, salience = ?, updated_at = ? WHERE id = ?`,
+		0.80, 0.85, base, person.ID,
+	); err != nil {
+		t.Fatalf("seed entity state: %v", err)
+	}
+
+	affected, err := s.DecayEntities(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay entities: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("expected 0 affected entities when decay disabled, got %d", affected)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after decay: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity after decay, got %+v", afterEntities)
+	}
+	if !almostEqual(afterPerson.Strength, 0.80) {
+		t.Fatalf("expected unchanged strength when decay disabled, got %f", afterPerson.Strength)
+	}
+	if !almostEqual(afterPerson.Salience, 0.85) {
+		t.Fatalf("expected unchanged salience when decay disabled, got %f", afterPerson.Salience)
+	}
+}
+
+func TestDecayEntitiesDoesNotIncreaseWeakValues(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_DECAY_RATE", "1.0")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.10")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.20")
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before decay: %v", err)
+	}
+	person, ok := findEntityByKindAndName(entities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity before decay, got %+v", entities)
+	}
+
+	base := time.Now().UTC().Add(-240 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE entities SET strength = ?, salience = ?, updated_at = ? WHERE id = ?`,
+		0.08, 0.18, base, person.ID,
+	); err != nil {
+		t.Fatalf("seed weak entity state: %v", err)
+	}
+
+	affected, err := s.DecayEntities(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("decay entities: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("expected no affected entity when values are already below floor, got %d", affected)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after decay: %v", err)
+	}
+	afterPerson, ok := findEntityByKindAndName(afterEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity after decay, got %+v", afterEntities)
+	}
+	if !almostEqual(afterPerson.Strength, 0.08) {
+		t.Fatalf("expected no strength increase during decay, got %f", afterPerson.Strength)
+	}
+	if !almostEqual(afterPerson.Salience, 0.18) {
+		t.Fatalf("expected no salience increase during decay, got %f", afterPerson.Salience)
+	}
+}
+
 func TestRelatedNotes(t *testing.T) {
 	s := setupTestStore(t)
 	a, _ := s.CreateNote("Seed", nil, nil, "")

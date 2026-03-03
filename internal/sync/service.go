@@ -20,14 +20,15 @@ type SyncResult struct {
 	TasksAdded     int      `json:"tasks_added"`
 	KBFilesUpdated []string `json:"kb_files_updated"`
 
-	DecayedNotes   int     `json:"-"`
-	DecayedEdges   int     `json:"-"`
-	PredictedNotes float64 `json:"-"`
-	PredictedTasks float64 `json:"-"`
-	NotesError     float64 `json:"-"`
-	TasksError     float64 `json:"-"`
-	PriorityDelta  int     `json:"-"`
-	AdjustedTasks  int     `json:"-"`
+	DecayedNotes    int     `json:"-"`
+	DecayedEdges    int     `json:"-"`
+	DecayedEntities int     `json:"-"`
+	PredictedNotes  float64 `json:"-"`
+	PredictedTasks  float64 `json:"-"`
+	NotesError      float64 `json:"-"`
+	TasksError      float64 `json:"-"`
+	PriorityDelta   int     `json:"-"`
+	AdjustedTasks   int     `json:"-"`
 }
 
 // claudeJSONResponse is the envelope returned by `claude -p --output-format json`.
@@ -64,6 +65,10 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	decayedEdges, err := s.store.DecayMemoryEdges(now)
 	if err != nil {
 		return nil, fmt.Errorf("decay memory edges: %w", err)
+	}
+	decayedEntities, err := s.store.DecayEntities(now)
+	if err != nil {
+		return nil, fmt.Errorf("decay entities: %w", err)
 	}
 	profile := s.buildSyncFocusProfile(runtimeCfg)
 	prompt := buildSyncPrompt(profile)
@@ -110,6 +115,7 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	}
 	result.DecayedNotes = decayedNotes
 	result.DecayedEdges = decayedEdges
+	result.DecayedEntities = decayedEntities
 	result.PredictedNotes = predictedNotes
 	result.PredictedTasks = predictedTasks
 	result.NotesError = float64(result.NotesAdded) - predictedNotes

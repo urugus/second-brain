@@ -30,6 +30,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_ENTITY_FEEDBACK_ALPHA", "")
 	t.Setenv("SB_ENTITY_FEEDBACK_DECAY", "")
 	t.Setenv("SB_ENTITY_FEEDBACK_MAX_ENTITIES", "")
+	t.Setenv("SB_ENTITY_DECAY_RATE", "")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "")
@@ -45,6 +48,7 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "")
 	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "")
 	t.Setenv("SB_FEATURE_ENTITY_FEEDBACK", "")
+	t.Setenv("SB_FEATURE_ENTITY_DECAY", "")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "")
 
 	cfg := LoadRuntime()
@@ -129,6 +133,15 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if cfg.EntityFeedbackMaxEntities != 10 {
 		t.Fatalf("unexpected default entity feedback max entities: %d", cfg.EntityFeedbackMaxEntities)
 	}
+	if cfg.EntityDecayRate != 0.008 {
+		t.Fatalf("unexpected default entity decay rate: %f", cfg.EntityDecayRate)
+	}
+	if cfg.EntityMinStrength != 0.10 {
+		t.Fatalf("unexpected default entity min strength: %f", cfg.EntityMinStrength)
+	}
+	if cfg.EntityMinSalience != 0.20 {
+		t.Fatalf("unexpected default entity min salience: %f", cfg.EntityMinSalience)
+	}
 	if cfg.TaskPriorityMax != 5 {
 		t.Fatalf("unexpected default task priority max: %d", cfg.TaskPriorityMax)
 	}
@@ -174,6 +187,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if !cfg.EntityFeedbackEnabled {
 		t.Fatal("entity feedback should default to enabled")
 	}
+	if !cfg.EntityDecayEnabled {
+		t.Fatal("entity decay should default to enabled")
+	}
 	if cfg.MetricsWindowDays != 14 {
 		t.Fatalf("unexpected default metrics window: %d", cfg.MetricsWindowDays)
 	}
@@ -207,6 +223,9 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_ENTITY_FEEDBACK_ALPHA", "0.16")
 	t.Setenv("SB_ENTITY_FEEDBACK_DECAY", "0.08")
 	t.Setenv("SB_ENTITY_FEEDBACK_MAX_ENTITIES", "6")
+	t.Setenv("SB_ENTITY_DECAY_RATE", "0.02")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.15")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.30")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "9")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "180")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "90")
@@ -222,6 +241,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "off")
 	t.Setenv("SB_FEATURE_ENTITY_DERIVED_EDGE", "0")
 	t.Setenv("SB_FEATURE_ENTITY_FEEDBACK", "false")
+	t.Setenv("SB_FEATURE_ENTITY_DECAY", "0")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "30")
 
 	cfg := LoadRuntime()
@@ -252,6 +272,9 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.EntityFeedbackAlpha != 0.16 ||
 		cfg.EntityFeedbackDecay != 0.08 ||
 		cfg.EntityFeedbackMaxEntities != 6 ||
+		cfg.EntityDecayRate != 0.02 ||
+		cfg.EntityMinStrength != 0.15 ||
+		cfg.EntityMinSalience != 0.30 ||
 		cfg.TaskPriorityMax != 9 ||
 		cfg.SyncFocusNotesLimit != 180 ||
 		cfg.SyncFocusTasksLimit != 90 ||
@@ -267,6 +290,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.EntityLearningEnabled ||
 		cfg.EntityDerivedEdgeEnabled ||
 		cfg.EntityFeedbackEnabled ||
+		cfg.EntityDecayEnabled ||
 		cfg.MetricsWindowDays != 30 {
 		t.Fatalf("unexpected overridden config: %+v", cfg)
 	}

@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -121,6 +122,102 @@ func (s *Store) ListEntitiesByNote(noteID int64) ([]model.Entity, error) {
 		return nil, fmt.Errorf("iterate entities by note: %w", err)
 	}
 	return out, nil
+}
+
+func (s *Store) DecayEntities(now time.Time) (int, error) {
+	cfg := config.LoadRuntime()
+	if !cfg.EntityDecayEnabled || cfg.EntityDecayRate <= 0 {
+		return 0, nil
+	}
+
+	now = now.UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT id, strength, salience, status, updated_at FROM entities`)
+	if err != nil {
+		return 0, fmt.Errorf("query entities for decay: %w", err)
+	}
+	defer rows.Close()
+
+	affected := 0
+	for rows.Next() {
+		var (
+			id        int64
+			strength  float64
+			salience  float64
+			status    string
+			updatedAt string
+		)
+		if err := rows.Scan(&id, &strength, &salience, &status, &updatedAt); err != nil {
+			return 0, fmt.Errorf("scan entity for decay: %w", err)
+		}
+
+		baseTime, err := time.Parse(time.RFC3339, updatedAt)
+		if err != nil {
+			continue
+		}
+		dtDays := now.Sub(baseTime.UTC()).Hours() / 24
+		if dtDays <= 0 {
+			continue
+		}
+
+		newStrength := strength * math.Exp(-cfg.EntityDecayRate*dtDays)
+		strengthFloor := cfg.EntityMinStrength
+		if strengthFloor > strength {
+			strengthFloor = strength
+		}
+		if newStrength < strengthFloor {
+			newStrength = strengthFloor
+		}
+
+		newSalience := salience * math.Exp(-(cfg.EntityDecayRate*0.70)*dtDays)
+		salienceFloor := cfg.EntityMinSalience
+		if salienceFloor > salience {
+			salienceFloor = salience
+		}
+		if newSalience < salienceFloor {
+			newSalience = salienceFloor
+		}
+
+		newStatus := status
+		if status == "confirmed" && newStrength < 0.55 {
+			newStatus = "candidate"
+		}
+
+		if math.Abs(newStrength-strength) < 1e-9 &&
+			math.Abs(newSalience-salience) < 1e-9 &&
+			newStatus == status {
+			continue
+		}
+
+		if _, err := tx.Exec(
+			`UPDATE entities
+			 SET strength = ?, salience = ?, status = ?, updated_at = ?
+			 WHERE id = ?`,
+			newStrength,
+			newSalience,
+			newStatus,
+			nowStr,
+			id,
+		); err != nil {
+			return 0, fmt.Errorf("update decayed entity %d: %w", id, err)
+		}
+		affected++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate entities for decay: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit entity decay: %w", err)
+	}
+	return affected, nil
 }
 
 func extractEntityCandidates(note model.Note) []entityCandidate {

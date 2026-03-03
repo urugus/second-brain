@@ -45,6 +45,9 @@ and save important information to second-brain.`,
 		if result.DecayedEdges > 0 {
 			fmt.Printf("  Memory edges decayed: %d edges\n", result.DecayedEdges)
 		}
+		if result.DecayedEntities > 0 {
+			fmt.Printf("  Entities decayed: %d entities\n", result.DecayedEntities)
+		}
 		fmt.Printf("  Prediction error: notes %.2f -> %d (%+.2f), tasks %.2f -> %d (%+.2f)\n",
 			result.PredictedNotes, result.NotesAdded, result.NotesError,
 			result.PredictedTasks, result.TasksAdded, result.TasksError,
