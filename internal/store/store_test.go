@@ -107,8 +107,8 @@ func TestMigrateFromV3ToLatestBackfillsDefaults(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("expected schema version 7, got %d", version)
+	if version != 8 {
+		t.Fatalf("expected schema version 8, got %d", version)
 	}
 
 	var strength, decayRate, salience float64
@@ -159,6 +159,18 @@ func TestMigrateV6CreatesPredictionErrorLogTable(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("expected prediction_error_log table to exist")
+	}
+}
+
+func TestMigrateV8CreatesNotesCreatedAtIndex(t *testing.T) {
+	s := setupTestStore(t)
+
+	exists, err := indexExists(s.db, "idx_notes_created_at")
+	if err != nil {
+		t.Fatalf("check index exists: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected idx_notes_created_at index to exist")
 	}
 }
 
@@ -1042,6 +1054,18 @@ func tableExists(db *sql.DB, tableName string) (bool, error) {
 	err := db.QueryRow(
 		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
 		tableName,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func indexExists(db *sql.DB, indexName string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`,
+		indexName,
 	).Scan(&count)
 	if err != nil {
 		return false, err
