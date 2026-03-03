@@ -8,6 +8,7 @@ import (
 
 	"github.com/urugus/second-brain/internal/adapter"
 	"github.com/urugus/second-brain/internal/kb"
+	"github.com/urugus/second-brain/internal/model"
 	"github.com/urugus/second-brain/internal/store"
 )
 
@@ -39,6 +40,9 @@ func setupTest(t *testing.T) (*store.Store, *kb.KB) {
 	t.Setenv("SB_SLEEP_POLICY_RECURRENCE_WEIGHT", "0.35")
 	t.Setenv("SB_SLEEP_POLICY_UTILITY_WEIGHT", "0.55")
 	t.Setenv("SB_SLEEP_POLICY_STALENESS_WEIGHT", "0.25")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "1")
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", "0.12")
+	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "24")
 
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -561,6 +565,51 @@ func TestSleepConsolidate_SkipsWhenPolicySelectedBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestSleepConsolidate_AutoLinksCooccurredNotes(t *testing.T) {
+	s, k := setupTest(t)
+
+	n1, _ := s.CreateNote("session boundary strategy", nil, []string{"session"}, "manual")
+	n2, _ := s.CreateNote("state transition policy", nil, []string{"state"}, "manual")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "sleep autolink test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "sleep/autolink.md",
+					Content: "# Sleep AutoLink\nsession boundary strategy\nstate transition policy\n",
+					Reason:  "co-occurred memories",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	result, err := svc.SleepConsolidate(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("sleep consolidate: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected sleep result")
+	}
+
+	fromFirst, err := s.RelatedNotes(n1.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n1: %v", err)
+	}
+	if !containsRelatedNote(fromFirst, n2.ID) {
+		t.Fatalf("expected note %d to auto-link to %d, got %+v", n1.ID, n2.ID, fromFirst)
+	}
+
+	fromSecond, err := s.RelatedNotes(n2.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n2: %v", err)
+	}
+	if !containsRelatedNote(fromSecond, n1.ID) {
+		t.Fatalf("expected note %d to auto-link to %d, got %+v", n2.ID, n1.ID, fromSecond)
+	}
+}
+
 func TestApplyAppendsRelatedSection(t *testing.T) {
 	s, k := setupTest(t)
 
@@ -682,6 +731,93 @@ func TestApplyRelatedSectionUsesContentMatchedNotes(t *testing.T) {
 	}
 }
 
+func TestApplyAutoLinksCooccurredNotes(t *testing.T) {
+	s, k := setupTest(t)
+
+	sess, _ := s.CreateSession("AutoLink Apply", "")
+	n1, _ := s.CreateNote("cache invalidation edge case", &sess.ID, []string{"cache"}, "manual")
+	n2, _ := s.CreateNote("ttl refresh backoff policy", &sess.ID, []string{"ttl"}, "manual")
+	s.EndSession(sess.ID, "done")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "apply autolink test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "apply/autolink.md",
+					Content: "# AutoLink\ncache invalidation edge case\nttl refresh backoff policy\n",
+					Reason:  "co-occurred notes",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if err := svc.Apply(context.Background(), proposed, []int{0}, nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	fromFirst, err := s.RelatedNotes(n1.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n1: %v", err)
+	}
+	if !containsRelatedNote(fromFirst, n2.ID) {
+		t.Fatalf("expected note %d to auto-link to %d, got %+v", n1.ID, n2.ID, fromFirst)
+	}
+
+	fromSecond, err := s.RelatedNotes(n2.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n2: %v", err)
+	}
+	if !containsRelatedNote(fromSecond, n1.ID) {
+		t.Fatalf("expected note %d to auto-link to %d, got %+v", n2.ID, n1.ID, fromSecond)
+	}
+}
+
+func TestApplyAutoLinkDisabled(t *testing.T) {
+	s, k := setupTest(t)
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "0")
+
+	sess, _ := s.CreateSession("AutoLink Disabled", "")
+	n1, _ := s.CreateNote("idempotent deployment checklist", &sess.ID, []string{"deploy"}, "manual")
+	n2, _ := s.CreateNote("rollback safety window", &sess.ID, []string{"deploy"}, "manual")
+	s.EndSession(sess.ID, "done")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "apply autolink disabled test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "apply/autolink-disabled.md",
+					Content: "# AutoLink Disabled\nidempotent deployment checklist\nrollback safety window\n",
+					Reason:  "co-occurred notes",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if err := svc.Apply(context.Background(), proposed, []int{0}, nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	fromFirst, err := s.RelatedNotes(n1.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes n1: %v", err)
+	}
+	if containsRelatedNote(fromFirst, n2.ID) {
+		t.Fatalf("did not expect auto-link when feature disabled, got %+v", fromFirst)
+	}
+}
+
 func TestApplyStripsOldRelatedSection(t *testing.T) {
 	s, k := setupTest(t)
 
@@ -724,4 +860,13 @@ func almostEqual(a, b float64) bool {
 		diff = -diff
 	}
 	return diff < 1e-9
+}
+
+func containsRelatedNote(related []model.RelatedNote, noteID int64) bool {
+	for _, rn := range related {
+		if rn.Note.ID == noteID {
+			return true
+		}
+	}
+	return false
 }

@@ -206,6 +206,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 
 	var appliedFiles []string
 	var writeErrors []string
+	autoLinkedPairs := make(map[string]struct{})
 	for _, u := range dedupedKBUpdates {
 		content := stripRelatedSection(u.Content)
 		if err := s.kb.Write(u.Path, content); err != nil {
@@ -218,6 +219,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		noteIDs := selectRelevantNoteIDsForKBUpdate(u.Content, replayPlan.replayNotes)
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
+			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
 		}
 	}
 
@@ -471,6 +473,71 @@ func selectRelevantNoteIDsForKBUpdate(kbContent string, notes []model.Note) []in
 	return selected
 }
 
+func (s *Service) autoLinkNotesForKBUpdate(noteIDs []int64, kbPath string, cfg config.Runtime, linkedPairs map[string]struct{}) {
+	if !cfg.MemoryEdgeAutoLinkEnabled || cfg.MemoryEdgeAutoLinkWeight <= 0 || cfg.MemoryEdgeAutoLinkMaxPairs <= 0 {
+		return
+	}
+
+	uniqueNoteIDs := uniqueSortedNoteIDs(noteIDs)
+	if len(uniqueNoteIDs) < 2 {
+		return
+	}
+
+	evidence := fmt.Sprintf("auto:kb-cooccurrence:%s", kbPath)
+	linked := 0
+	for i := 0; i < len(uniqueNoteIDs); i++ {
+		if linked >= cfg.MemoryEdgeAutoLinkMaxPairs {
+			break
+		}
+		for j := i + 1; j < len(uniqueNoteIDs); j++ {
+			if linked >= cfg.MemoryEdgeAutoLinkMaxPairs {
+				break
+			}
+			a := uniqueNoteIDs[i]
+			b := uniqueNoteIDs[j]
+			key := notePairKey(a, b)
+			if _, exists := linkedPairs[key]; exists {
+				continue
+			}
+
+			if err := s.store.LinkNotes(a, b, cfg.MemoryEdgeAutoLinkWeight, evidence); err != nil {
+				continue
+			}
+			if err := s.store.LinkNotes(b, a, cfg.MemoryEdgeAutoLinkWeight, evidence); err != nil {
+				continue
+			}
+
+			linkedPairs[key] = struct{}{}
+			linked++
+		}
+	}
+}
+
+func uniqueSortedNoteIDs(noteIDs []int64) []int64 {
+	if len(noteIDs) == 0 {
+		return nil
+	}
+
+	seen := make(map[int64]struct{}, len(noteIDs))
+	out := make([]int64, 0, len(noteIDs))
+	for _, id := range noteIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func notePairKey(a, b int64) string {
+	if a > b {
+		a, b = b, a
+	}
+	return fmt.Sprintf("%d:%d", a, b)
+}
+
 func summarizeSleepPolicyReasons(decisions []sleepPolicyDecision, limit int) []string {
 	if len(decisions) == 0 || limit <= 0 {
 		return nil
@@ -512,6 +579,8 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 
 	// Gather session notes for selective KB mapping
 	sessionNotes, _ := s.store.ListNotes(store.NoteFilter{SessionID: &changes.SessionID})
+	runtimeCfg := config.LoadRuntime()
+	autoLinkedPairs := make(map[string]struct{})
 
 	// Write approved KB files
 	for _, idx := range approvedKBIndices {
@@ -529,6 +598,7 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 		noteIDs := selectRelevantNoteIDsForKBUpdate(u.Content, sessionNotes)
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
+			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
 		}
 	}
 

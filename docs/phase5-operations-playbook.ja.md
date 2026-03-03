@@ -25,6 +25,8 @@ sb sync metrics --days 14
 | `SB_TASK_PRIORITY_MAX` | `5` | タスク優先度の上限 |
 | `SB_SLEEP_REPLAY_ALPHA` | `0.18` | sleep replay による強度更新係数 |
 | `SB_SLEEP_DUPLICATE_REPLAY_WEIGHT` | `0.35` | 重複ノートの replay 重み |
+| `SB_MEMORY_EDGE_AUTOLINK_WEIGHT` | `0.12` | consolidation 時に自動生成する memory edge の重み |
+| `SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS` | `24` | 1 回の consolidation で自動生成するノート対の上限 |
 | `SB_METRICS_WINDOW_DAYS` | `14` | `sync metrics` の既定集計期間 |
 
 ## 3. Feature Flag とロールバック
@@ -35,11 +37,13 @@ sb sync metrics --days 14
 |---|---|---|
 | `SB_FEATURE_PREDICTION_LEARNING` | `1` | prediction error 記録と優先度自動補正を停止 |
 | `SB_FEATURE_SLEEP_REPLAY` | `1` | sleep replay の dedupe/強度更新を停止（従来の consolidated_at 更新のみ） |
+| `SB_FEATURE_MEMORY_EDGE_AUTOLINK` | `1` | consolidation 時の note 間自動リンク生成を停止 |
 
 ### 緊急ロールバック手順
 1. 実行環境で以下を設定する。
    - `SB_FEATURE_PREDICTION_LEARNING=0`
    - `SB_FEATURE_SLEEP_REPLAY=0`
+   - `SB_FEATURE_MEMORY_EDGE_AUTOLINK=0`
 2. `sb sync run` を 1 回実行し、処理が継続可能か確認する。
 3. `sb sync metrics --days 7` で KPI の急変有無を確認する。
 4. 必要に応じてパラメータを段階的に戻し、feature flag を再有効化する。
