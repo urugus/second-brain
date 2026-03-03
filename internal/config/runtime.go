@@ -31,6 +31,9 @@ type Runtime struct {
 	EntityDerivedEdgeWeight    float64
 	EntityDerivedEdgeMaxLinks  int
 	EntityDerivedEdgeMinShared int
+	EntityFeedbackAlpha        float64
+	EntityFeedbackDecay        float64
+	EntityFeedbackMaxEntities  int
 	TaskPriorityMax            int
 	SyncFocusNotesLimit        int
 	SyncFocusTasksLimit        int
@@ -45,6 +48,7 @@ type Runtime struct {
 	MemoryEdgeFeedbackEnabled  bool
 	EntityLearningEnabled      bool
 	EntityDerivedEdgeEnabled   bool
+	EntityFeedbackEnabled      bool
 	MetricsWindowDays          int
 }
 
@@ -74,6 +78,9 @@ func LoadRuntime() Runtime {
 		EntityDerivedEdgeWeight:    getFloat("SB_ENTITY_DERIVED_EDGE_WEIGHT", 0.14, 0.0, 1.0),
 		EntityDerivedEdgeMaxLinks:  getInt("SB_ENTITY_DERIVED_EDGE_MAX_LINKS", 4, 0, 500),
 		EntityDerivedEdgeMinShared: getInt("SB_ENTITY_DERIVED_EDGE_MIN_SHARED", 1, 1, 20),
+		EntityFeedbackAlpha:        getFloat("SB_ENTITY_FEEDBACK_ALPHA", 0.10, 0.0, 1.0),
+		EntityFeedbackDecay:        getFloat("SB_ENTITY_FEEDBACK_DECAY", 0.04, 0.0, 1.0),
+		EntityFeedbackMaxEntities:  getInt("SB_ENTITY_FEEDBACK_MAX_ENTITIES", 10, 0, 500),
 		TaskPriorityMax:            getInt("SB_TASK_PRIORITY_MAX", 5, 1, 100),
 		SyncFocusNotesLimit:        getInt("SB_SYNC_FOCUS_NOTES_LIMIT", 250, 10, 5000),
 		SyncFocusTasksLimit:        getInt("SB_SYNC_FOCUS_TASKS_LIMIT", 120, 5, 2000),
@@ -88,6 +95,7 @@ func LoadRuntime() Runtime {
 		MemoryEdgeFeedbackEnabled:  getBool("SB_FEATURE_MEMORY_EDGE_FEEDBACK", true),
 		EntityLearningEnabled:      getBool("SB_FEATURE_ENTITY_LEARNING", true),
 		EntityDerivedEdgeEnabled:   getBool("SB_FEATURE_ENTITY_DERIVED_EDGE", true),
+		EntityFeedbackEnabled:      getBool("SB_FEATURE_ENTITY_FEEDBACK", true),
 		MetricsWindowDays:          getInt("SB_METRICS_WINDOW_DAYS", 14, 1, 365),
 	}
 }
