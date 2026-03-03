@@ -178,6 +178,13 @@ sb consolidate
 | `note related <id>` | Show related notes from memory edges | `--depth`, `--limit` |
 | `note link <from-id> <to-id>` | Create/reinforce a directed memory edge | `--weight`, `--evidence` |
 
+### entity
+
+| Command | Description | Flags |
+|---------|-------------|-------|
+| `entity list` | List learned entities | `--note`, `--kind`, `--status`, `--limit` |
+| `entity show <id>` | Show one learned entity | |
+
 ### kb
 
 | Command | Description |

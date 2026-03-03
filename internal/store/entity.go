@@ -32,6 +32,12 @@ type learnedEntity struct {
 	Confidence float64
 }
 
+type EntityFilter struct {
+	Kind   *string
+	Status *string
+	Limit  int
+}
+
 func (s *Store) LearnEntitiesFromNote(note model.Note, source string) error {
 	cfg := config.LoadRuntime()
 	if !cfg.EntityLearningEnabled {
@@ -94,7 +100,69 @@ func (s *Store) ListEntitiesByNote(noteID int64) ([]model.Entity, error) {
 		return nil, fmt.Errorf("query entities by note: %w", err)
 	}
 	defer rows.Close()
+	return scanEntitiesFromRows(rows)
+}
 
+func (s *Store) GetEntity(id int64) (*model.Entity, error) {
+	row := s.db.QueryRow(
+		`SELECT id, kind, canonical_name, normalized_name, strength, salience, status, created_at, updated_at
+		 FROM entities
+		 WHERE id = ?`,
+		id,
+	)
+
+	var (
+		entity          model.Entity
+		createdAt, upAt string
+	)
+	if err := row.Scan(
+		&entity.ID,
+		&entity.Kind,
+		&entity.CanonicalName,
+		&entity.NormalizedName,
+		&entity.Strength,
+		&entity.Salience,
+		&entity.Status,
+		&createdAt,
+		&upAt,
+	); err != nil {
+		return nil, err
+	}
+	entity.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	entity.UpdatedAt, _ = time.Parse(time.RFC3339, upAt)
+	return &entity, nil
+}
+
+func (s *Store) ListEntities(filter EntityFilter) ([]model.Entity, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := `SELECT id, kind, canonical_name, normalized_name, strength, salience, status, created_at, updated_at
+	          FROM entities
+			  WHERE 1=1`
+	args := make([]any, 0, 3)
+	if filter.Kind != nil {
+		query += ` AND kind = ?`
+		args = append(args, strings.ToLower(strings.TrimSpace(*filter.Kind)))
+	}
+	if filter.Status != nil {
+		query += ` AND status = ?`
+		args = append(args, strings.ToLower(strings.TrimSpace(*filter.Status)))
+	}
+	query += ` ORDER BY salience DESC, strength DESC, id ASC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query entities: %w", err)
+	}
+	defer rows.Close()
+	return scanEntitiesFromRows(rows)
+}
+
+func scanEntitiesFromRows(rows *sql.Rows) ([]model.Entity, error) {
 	var out []model.Entity
 	for rows.Next() {
 		var (
@@ -119,7 +187,7 @@ func (s *Store) ListEntitiesByNote(noteID int64) ([]model.Entity, error) {
 		out = append(out, entity)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate entities by note: %w", err)
+		return nil, fmt.Errorf("iterate entities: %w", err)
 	}
 	return out, nil
 }
