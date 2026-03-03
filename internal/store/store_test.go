@@ -17,10 +17,15 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "1")
 	t.Setenv("SB_SLEEP_REPLAY_ALPHA", "0.18")
 	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "0.35")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_WEIGHT", "0.20")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", "0.34")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_CANDIDATES", "80")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "3")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
 	t.Setenv("SB_SLEEP_THRESHOLD", "10")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "0")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "14")
 
 	dir := t.TempDir()
@@ -102,8 +107,8 @@ func TestMigrateFromV3ToLatestBackfillsDefaults(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("expected schema version 7, got %d", version)
+	if version != 8 {
+		t.Fatalf("expected schema version 8, got %d", version)
 	}
 
 	var strength, decayRate, salience float64
@@ -154,6 +159,18 @@ func TestMigrateV6CreatesPredictionErrorLogTable(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("expected prediction_error_log table to exist")
+	}
+}
+
+func TestMigrateV8CreatesNotesCreatedAtIndex(t *testing.T) {
+	s := setupTestStore(t)
+
+	exists, err := indexExists(s.db, "idx_notes_created_at")
+	if err != nil {
+		t.Fatalf("check index exists: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected idx_notes_created_at index to exist")
 	}
 }
 
@@ -597,6 +614,84 @@ func TestLinkNotesUpsertReinforcesWeight(t *testing.T) {
 	}
 }
 
+func TestCreateNoteAutoLinksSimilarNotesWhenEnabled(t *testing.T) {
+	s := setupTestStore(t)
+
+	first, _ := s.CreateNote("cache invalidation strategy for api gateway", nil, []string{"cache", "api"}, "manual")
+	second, _ := s.CreateNote("api gateway cache ttl backoff strategy", nil, []string{"cache", "api"}, "manual")
+	noise, _ := s.CreateNote("frontend typography and spacing baseline", nil, []string{"design"}, "manual")
+
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "1")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "2")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", "0.20")
+
+	newNote, _ := s.CreateNote("api gateway cache invalidation and ttl strategy", nil, []string{"cache", "api"}, "manual")
+
+	related, err := s.RelatedNotes(newNote.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes for new note: %v", err)
+	}
+	if !hasRelatedNoteID(related, first.ID) {
+		t.Fatalf("expected auto-link to first note %d, got %+v", first.ID, related)
+	}
+	if !hasRelatedNoteID(related, second.ID) {
+		t.Fatalf("expected auto-link to second note %d, got %+v", second.ID, related)
+	}
+	if hasRelatedNoteID(related, noise.ID) {
+		t.Fatalf("did not expect unrelated note %d in auto-link results: %+v", noise.ID, related)
+	}
+
+	reverse, err := s.RelatedNotes(first.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes for reverse check: %v", err)
+	}
+	if !hasRelatedNoteID(reverse, newNote.ID) {
+		t.Fatalf("expected reverse auto-link from %d to %d, got %+v", first.ID, newNote.ID, reverse)
+	}
+}
+
+func TestCreateNoteAutoLinkDisabled(t *testing.T) {
+	s := setupTestStore(t)
+
+	first, _ := s.CreateNote("incident rollback checklist", nil, []string{"ops"}, "manual")
+	second, _ := s.CreateNote("incident rollback checklist and owner rotation", nil, []string{"ops"}, "manual")
+
+	related, err := s.RelatedNotes(second.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes: %v", err)
+	}
+	if hasRelatedNoteID(related, first.ID) {
+		t.Fatalf("did not expect auto-link while feature disabled, got %+v", related)
+	}
+}
+
+func TestCreateNoteAutoLinkRespectsMaxLinks(t *testing.T) {
+	s := setupTestStore(t)
+
+	c1, _ := s.CreateNote("query planner index strategy", nil, []string{"db"}, "manual")
+	c2, _ := s.CreateNote("query planner join strategy", nil, []string{"db"}, "manual")
+	c3, _ := s.CreateNote("query planner cache strategy", nil, []string{"db"}, "manual")
+
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "1")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "1")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", "0.10")
+
+	newNote, _ := s.CreateNote("query planner strategy for index join cache", nil, []string{"db"}, "manual")
+
+	related, err := s.RelatedNotes(newNote.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("related notes: %v", err)
+	}
+	if len(related) != 1 {
+		t.Fatalf("expected exactly 1 direct auto-link, got %d (%+v)", len(related), related)
+	}
+
+	target := related[0].Note.ID
+	if target != c1.ID && target != c2.ID && target != c3.ID {
+		t.Fatalf("unexpected auto-link target: %d", target)
+	}
+}
+
 func TestRelatedNotes(t *testing.T) {
 	s := setupTestStore(t)
 	a, _ := s.CreateNote("Seed", nil, nil, "")
@@ -966,6 +1061,18 @@ func tableExists(db *sql.DB, tableName string) (bool, error) {
 	return count > 0, nil
 }
 
+func indexExists(db *sql.DB, indexName string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`,
+		indexName,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func createSchemaV3Database(t *testing.T, dbPath string) {
 	t.Helper()
 
@@ -1026,6 +1133,15 @@ func createSchemaV3Database(t *testing.T, dbPath string) {
 	); err != nil {
 		t.Fatalf("insert legacy note: %v", err)
 	}
+}
+
+func hasRelatedNoteID(related []model.RelatedNote, noteID int64) bool {
+	for _, rn := range related {
+		if rn.Note.ID == noteID {
+			return true
+		}
+	}
+	return false
 }
 
 func almostEqual(a, b float64) bool {

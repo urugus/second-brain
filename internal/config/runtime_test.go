@@ -14,6 +14,10 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "")
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", "")
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_WEIGHT", "")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", "")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_CANDIDATES", "")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "")
@@ -23,6 +27,7 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "")
 	t.Setenv("SB_FEATURE_SYNC_FOCUS_LEARNING", "")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "")
 
 	cfg := LoadRuntime()
@@ -59,6 +64,18 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if cfg.MemoryEdgeAutoLinkMaxPairs != 24 {
 		t.Fatalf("unexpected default memory edge autolink max pairs: %d", cfg.MemoryEdgeAutoLinkMaxPairs)
 	}
+	if cfg.MemoryEdgeCreateWeight != 0.20 {
+		t.Fatalf("unexpected default create autolink weight: %f", cfg.MemoryEdgeCreateWeight)
+	}
+	if cfg.MemoryEdgeCreateMinScore != 0.34 {
+		t.Fatalf("unexpected default create autolink min score: %f", cfg.MemoryEdgeCreateMinScore)
+	}
+	if cfg.MemoryEdgeCreateCandidates != 80 {
+		t.Fatalf("unexpected default create autolink candidates: %d", cfg.MemoryEdgeCreateCandidates)
+	}
+	if cfg.MemoryEdgeCreateMaxLinks != 3 {
+		t.Fatalf("unexpected default create autolink max links: %d", cfg.MemoryEdgeCreateMaxLinks)
+	}
 	if cfg.TaskPriorityMax != 5 {
 		t.Fatalf("unexpected default task priority max: %d", cfg.TaskPriorityMax)
 	}
@@ -86,6 +103,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if !cfg.MemoryEdgeAutoLinkEnabled {
 		t.Fatal("memory edge autolink should default to enabled")
 	}
+	if cfg.MemoryEdgeCreateEnabled {
+		t.Fatal("memory edge create autolink should default to disabled")
+	}
 	if cfg.MetricsWindowDays != 14 {
 		t.Fatalf("unexpected default metrics window: %d", cfg.MetricsWindowDays)
 	}
@@ -103,6 +123,10 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", "0.4")
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", "0.19")
 	t.Setenv("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", "8")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_WEIGHT", "0.23")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", "0.41")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_CANDIDATES", "120")
+	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "5")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "9")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "180")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "90")
@@ -112,6 +136,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_FEATURE_SLEEP_REPLAY", "0")
 	t.Setenv("SB_FEATURE_SYNC_FOCUS_LEARNING", "off")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "false")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "1")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "30")
 
 	cfg := LoadRuntime()
@@ -126,6 +151,10 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.SleepDuplicateReplayWeight != 0.4 ||
 		cfg.MemoryEdgeAutoLinkWeight != 0.19 ||
 		cfg.MemoryEdgeAutoLinkMaxPairs != 8 ||
+		cfg.MemoryEdgeCreateWeight != 0.23 ||
+		cfg.MemoryEdgeCreateMinScore != 0.41 ||
+		cfg.MemoryEdgeCreateCandidates != 120 ||
+		cfg.MemoryEdgeCreateMaxLinks != 5 ||
 		cfg.TaskPriorityMax != 9 ||
 		cfg.SyncFocusNotesLimit != 180 ||
 		cfg.SyncFocusTasksLimit != 90 ||
@@ -135,6 +164,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.SleepReplayEnabled ||
 		cfg.SyncFocusLearningEnabled ||
 		cfg.MemoryEdgeAutoLinkEnabled ||
+		!cfg.MemoryEdgeCreateEnabled ||
 		cfg.MetricsWindowDays != 30 {
 		t.Fatalf("unexpected overridden config: %+v", cfg)
 	}

@@ -60,6 +60,7 @@ func (s *Store) migrate() error {
 		migrateV5,
 		migrateV6,
 		migrateV7,
+		migrateV8,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -266,6 +267,14 @@ func migrateV6(tx *sql.Tx) error {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("exec %q: %w", stmt[:40], err)
 		}
+	}
+	return nil
+}
+
+func migrateV8(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("exec %q: %w", "CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC)", err)
 	}
 	return nil
 }
