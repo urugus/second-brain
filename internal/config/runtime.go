@@ -18,6 +18,10 @@ type Runtime struct {
 	SleepDuplicateReplayWeight float64
 	MemoryEdgeAutoLinkWeight   float64
 	MemoryEdgeAutoLinkMaxPairs int
+	MemoryEdgeCreateWeight     float64
+	MemoryEdgeCreateMinScore   float64
+	MemoryEdgeCreateCandidates int
+	MemoryEdgeCreateMaxLinks   int
 	TaskPriorityMax            int
 	SyncFocusNotesLimit        int
 	SyncFocusTasksLimit        int
@@ -27,6 +31,7 @@ type Runtime struct {
 	SleepReplayEnabled         bool
 	SyncFocusLearningEnabled   bool
 	MemoryEdgeAutoLinkEnabled  bool
+	MemoryEdgeCreateEnabled    bool
 	MetricsWindowDays          int
 }
 
@@ -43,6 +48,10 @@ func LoadRuntime() Runtime {
 		SleepDuplicateReplayWeight: getFloat("SB_SLEEP_DUPLICATE_REPLAY_WEIGHT", 0.35, 0.0, 1.0),
 		MemoryEdgeAutoLinkWeight:   getFloat("SB_MEMORY_EDGE_AUTOLINK_WEIGHT", 0.12, 0.0, 1.0),
 		MemoryEdgeAutoLinkMaxPairs: getInt("SB_MEMORY_EDGE_AUTOLINK_MAX_PAIRS", 24, 0, 10_000),
+		MemoryEdgeCreateWeight:     getFloat("SB_MEMORY_EDGE_CREATE_AUTOLINK_WEIGHT", 0.20, 0.0, 1.0),
+		MemoryEdgeCreateMinScore:   getFloat("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", 0.34, 0.0, 1.0),
+		MemoryEdgeCreateCandidates: getInt("SB_MEMORY_EDGE_CREATE_AUTOLINK_CANDIDATES", 80, 0, 10_000),
+		MemoryEdgeCreateMaxLinks:   getInt("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", 3, 0, 100),
 		TaskPriorityMax:            getInt("SB_TASK_PRIORITY_MAX", 5, 1, 100),
 		SyncFocusNotesLimit:        getInt("SB_SYNC_FOCUS_NOTES_LIMIT", 250, 10, 5000),
 		SyncFocusTasksLimit:        getInt("SB_SYNC_FOCUS_TASKS_LIMIT", 120, 5, 2000),
@@ -52,6 +61,7 @@ func LoadRuntime() Runtime {
 		SleepReplayEnabled:         getBool("SB_FEATURE_SLEEP_REPLAY", true),
 		SyncFocusLearningEnabled:   getBool("SB_FEATURE_SYNC_FOCUS_LEARNING", true),
 		MemoryEdgeAutoLinkEnabled:  getBool("SB_FEATURE_MEMORY_EDGE_AUTOLINK", true),
+		MemoryEdgeCreateEnabled:    getBool("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", false),
 		MetricsWindowDays:          getInt("SB_METRICS_WINDOW_DAYS", 14, 1, 365),
 	}
 }

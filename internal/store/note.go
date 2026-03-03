@@ -56,7 +56,7 @@ func (s *Store) CreateNote(content string, sessionID *int64, tags []string, sour
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	return &model.Note{
+	note := &model.Note{
 		ID:          id,
 		SessionID:   sessionID,
 		Content:     content,
@@ -68,7 +68,12 @@ func (s *Store) CreateNote(content string, sessionID *int64, tags []string, sour
 		RecallCount: 0,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	}, nil
+	}
+
+	// Best-effort: note capture must not fail due to association linking errors.
+	s.autoLinkNewNote(note.ID, note.SessionID, note.Content, note.Tags, note.CreatedAt)
+
+	return note, nil
 }
 
 func (s *Store) GetNote(id int64) (*model.Note, error) {
