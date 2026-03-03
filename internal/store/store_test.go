@@ -222,6 +222,56 @@ func TestRecallNote(t *testing.T) {
 	}
 }
 
+func TestRecallNote_ContextMatchBoostsStrength(t *testing.T) {
+	s := setupTestStore(t)
+
+	matched, err := s.CreateNote("golang interfaces and adapters", nil, []string{"go"}, "manual")
+	if err != nil {
+		t.Fatalf("create matched note: %v", err)
+	}
+	unmatched, err := s.CreateNote("python decorators and closures", nil, []string{"python"}, "manual")
+	if err != nil {
+		t.Fatalf("create unmatched note: %v", err)
+	}
+
+	beforeMatched, err := s.GetNote(matched.ID)
+	if err != nil {
+		t.Fatalf("get matched note before recall: %v", err)
+	}
+	beforeUnmatched, err := s.GetNote(unmatched.ID)
+	if err != nil {
+		t.Fatalf("get unmatched note before recall: %v", err)
+	}
+
+	recallAt := beforeMatched.CreatedAt.Add(2 * time.Hour)
+	context := "interfaces adapter"
+	if err := s.RecallNote(matched.ID, recallAt, context); err != nil {
+		t.Fatalf("recall matched note: %v", err)
+	}
+	if err := s.RecallNote(unmatched.ID, recallAt, context); err != nil {
+		t.Fatalf("recall unmatched note: %v", err)
+	}
+
+	afterMatched, err := s.GetNote(matched.ID)
+	if err != nil {
+		t.Fatalf("get matched note after recall: %v", err)
+	}
+	afterUnmatched, err := s.GetNote(unmatched.ID)
+	if err != nil {
+		t.Fatalf("get unmatched note after recall: %v", err)
+	}
+
+	deltaMatched := afterMatched.Strength - beforeMatched.Strength
+	deltaUnmatched := afterUnmatched.Strength - beforeUnmatched.Strength
+	if deltaMatched <= deltaUnmatched {
+		t.Fatalf(
+			"expected context-matched note to gain more strength: matched=%f unmatched=%f",
+			deltaMatched,
+			deltaUnmatched,
+		)
+	}
+}
+
 func TestRecallNoteNotFound(t *testing.T) {
 	s := setupTestStore(t)
 	if err := s.RecallNote(9999, time.Now(), "missing"); err == nil {
