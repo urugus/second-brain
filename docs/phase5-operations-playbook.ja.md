@@ -43,6 +43,9 @@ sb sync metrics --days 14
 | `SB_ENTITY_FEEDBACK_ALPHA` | `0.10` | recall 時の context 一致 entity 強化係数 |
 | `SB_ENTITY_FEEDBACK_DECAY` | `0.04` | recall 時の context 不一致 entity 減衰率 |
 | `SB_ENTITY_FEEDBACK_MAX_ENTITIES` | `10` | recall 1回でフィードバック更新する entity 数上限 |
+| `SB_ENTITY_DECAY_RATE` | `0.008` | sync 実行時に適用する entity 減衰率 |
+| `SB_ENTITY_MIN_STRENGTH` | `0.10` | entity 減衰後の最小 strength |
+| `SB_ENTITY_MIN_SALIENCE` | `0.20` | entity 減衰後の最小 salience |
 | `SB_METRICS_WINDOW_DAYS` | `14` | `sync metrics` の既定集計期間 |
 
 ## 3. Feature Flag とロールバック
@@ -60,6 +63,7 @@ sb sync metrics --days 14
 | `SB_FEATURE_ENTITY_LEARNING` | `1` | consolidation 時の entity 派生学習を停止 |
 | `SB_FEATURE_ENTITY_DERIVED_EDGE` | `1` | entity 共有ベースの note 間 auto-link を停止 |
 | `SB_FEATURE_ENTITY_FEEDBACK` | `1` | recall 時の entity フィードバック学習を停止 |
+| `SB_FEATURE_ENTITY_DECAY` | `1` | sync 実行時の entity 減衰を停止 |
 
 ### 緊急ロールバック手順
 1. 実行環境で以下を設定する。
@@ -72,6 +76,7 @@ sb sync metrics --days 14
    - `SB_FEATURE_ENTITY_LEARNING=0`
    - `SB_FEATURE_ENTITY_DERIVED_EDGE=0`
    - `SB_FEATURE_ENTITY_FEEDBACK=0`
+   - `SB_FEATURE_ENTITY_DECAY=0`
 2. `sb sync run` を 1 回実行し、処理が継続可能か確認する。
 3. `sb sync metrics --days 7` で KPI の急変有無を確認する。
 4. 必要に応じてパラメータを段階的に戻し、feature flag を再有効化する。

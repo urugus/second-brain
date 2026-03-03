@@ -30,6 +30,11 @@ func setupTestStore(t *testing.T) *store.Store {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "1")
 	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "0.010")
 	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "0.02")
+	t.Setenv("SB_FEATURE_ENTITY_LEARNING", "1")
+	t.Setenv("SB_FEATURE_ENTITY_DECAY", "1")
+	t.Setenv("SB_ENTITY_DECAY_RATE", "0.008")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.10")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.20")
 
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "test.db"))
@@ -191,6 +196,77 @@ func TestSyncRun_AppliesMemoryEdgeDecay(t *testing.T) {
 	afterScore := afterRelated[0].Score
 	if afterScore >= beforeScore {
 		t.Fatalf("expected edge score to decay during sync run: before=%f after=%f", beforeScore, afterScore)
+	}
+}
+
+func TestSyncRun_AppliesEntityDecay(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_ENTITY_DECAY_RATE", "1.0")
+	t.Setenv("SB_ENTITY_MIN_STRENGTH", "0.10")
+	t.Setenv("SB_ENTITY_MIN_SALIENCE", "0.20")
+	t.Setenv("SB_ENTITY_FEEDBACK_ALPHA", "0.25")
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities before sync run: %v", err)
+	}
+	if len(entities) == 0 {
+		t.Fatal("expected at least one learned entity")
+	}
+
+	seedRecallAt := time.Now().UTC().Add(-96 * time.Hour)
+	for i := 0; i < 3; i++ {
+		if err := s.RecallNote(note.ID, seedRecallAt, "grace hopper compiler"); err != nil {
+			t.Fatalf("seed recall %d: %v", i+1, err)
+		}
+	}
+	seededEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after seed recalls: %v", err)
+	}
+	if len(seededEntities) == 0 {
+		t.Fatal("expected learned entity after seed recalls")
+	}
+	beforeStrength := seededEntities[0].Strength
+
+	syncResult := SyncResult{
+		Summary:        "Sync with entity decay",
+		NotesAdded:     0,
+		TasksAdded:     0,
+		KBFilesUpdated: []string{},
+	}
+	envelope := claudeJSONResponse{
+		Type:             "result",
+		StructuredOutput: &syncResult,
+	}
+	envelopeJSON, _ := json.Marshal(envelope)
+
+	svc := NewService(s, &mockExecutor{output: envelopeJSON}, "")
+	result, err := svc.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync run: %v", err)
+	}
+	if result.DecayedEntities < 1 {
+		t.Fatalf("expected at least 1 decayed entity, got %d", result.DecayedEntities)
+	}
+
+	afterEntities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities after sync run: %v", err)
+	}
+	if len(afterEntities) == 0 {
+		t.Fatal("expected learned entity after sync run")
+	}
+	if afterEntities[0].Strength >= beforeStrength {
+		t.Fatalf("expected entity strength to decay during sync run: before=%f after=%f", beforeStrength, afterEntities[0].Strength)
 	}
 }
 
