@@ -66,8 +66,7 @@ func (s *Store) LearnEntitiesFromNote(note model.Note, source string) error {
 			return err
 		}
 	}
-	if cfg.MemoryEdgeAutoLinkEnabled &&
-		cfg.EntityDerivedEdgeEnabled &&
+	if cfg.EntityDerivedEdgeEnabled &&
 		cfg.EntityDerivedEdgeWeight > 0 &&
 		cfg.EntityDerivedEdgeMaxLinks > 0 {
 		if err := upsertEntityDerivedMemoryEdges(tx, learned, note.ID, nowStr, cfg); err != nil {
