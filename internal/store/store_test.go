@@ -1068,6 +1068,72 @@ func TestLearnEntitiesFromNotePromotesEntityAfterRepeatedEvidence(t *testing.T) 
 	}
 }
 
+func TestListEntitiesSupportsKindAndStatusFilters(t *testing.T) {
+	s := setupTestStore(t)
+
+	first, err := s.CreateNote(
+		"Grace Hopper compiler note",
+		nil,
+		[]string{"person:Grace Hopper", "concept:Compiler"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create first note: %v", err)
+	}
+	second, err := s.CreateNote(
+		"Grace Hopper design memo",
+		nil,
+		[]string{"person:Grace Hopper", "concept:Design"},
+		"manual",
+	)
+	if err != nil {
+		t.Fatalf("create second note: %v", err)
+	}
+
+	if err := s.LearnEntitiesFromNote(*first, "consolidation_apply"); err != nil {
+		t.Fatalf("learn first note entities: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*second, "consolidation_apply"); err != nil {
+		t.Fatalf("learn second note entities: %v", err)
+	}
+
+	personKind := "person"
+	personOnly, err := s.ListEntities(EntityFilter{Kind: &personKind, Limit: 10})
+	if err != nil {
+		t.Fatalf("list entities by kind: %v", err)
+	}
+	if len(personOnly) == 0 {
+		t.Fatal("expected person entities")
+	}
+	for _, entity := range personOnly {
+		if entity.Kind != "person" {
+			t.Fatalf("expected only person kind, got %+v", entity)
+		}
+	}
+
+	confirmed := "confirmed"
+	confirmedOnly, err := s.ListEntities(EntityFilter{Status: &confirmed, Limit: 10})
+	if err != nil {
+		t.Fatalf("list entities by status: %v", err)
+	}
+	if len(confirmedOnly) == 0 {
+		t.Fatal("expected at least one confirmed entity")
+	}
+	for _, entity := range confirmedOnly {
+		if entity.Status != "confirmed" {
+			t.Fatalf("expected only confirmed status, got %+v", entity)
+		}
+	}
+
+	got, err := s.GetEntity(confirmedOnly[0].ID)
+	if err != nil {
+		t.Fatalf("get entity by id: %v", err)
+	}
+	if got.ID != confirmedOnly[0].ID {
+		t.Fatalf("expected same entity id, got %d want %d", got.ID, confirmedOnly[0].ID)
+	}
+}
+
 func TestLearnEntitiesFromNoteCreatesEntityDerivedMemoryEdges(t *testing.T) {
 	s := setupTestStore(t)
 

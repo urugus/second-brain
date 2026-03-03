@@ -176,6 +176,13 @@ sb consolidate
 | `note related <id>` | memory edge に基づく関連メモを表示 | `--depth`, `--limit` |
 | `note link <from-id> <to-id>` | 有向 memory edge を作成/強化 | `--weight`, `--evidence` |
 
+### entity
+
+| コマンド | 説明 | フラグ |
+|---------|------|-------|
+| `entity list` | 学習済み entity を一覧表示 | `--note`, `--kind`, `--status`, `--limit` |
+| `entity show <id>` | entity の詳細を表示 | |
+
 ### kb
 
 | コマンド | 説明 |
