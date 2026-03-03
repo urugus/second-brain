@@ -335,6 +335,58 @@ func TestSyncRun_PredictionErrorAdjustsTaskPriority(t *testing.T) {
 	}
 }
 
+func TestSyncRun_PredictionLearningAdjustsOnlyContextMatchedTasks(t *testing.T) {
+	s := setupTestStore(t)
+
+	seedCompleted := func(notes, tasks int) {
+		log, err := s.CreateSyncLog("seed", "prompt")
+		if err != nil {
+			t.Fatalf("create seed sync log: %v", err)
+		}
+		if err := s.UpdateSyncLog(log.ID, model.SyncCompleted, "seed", notes, tasks, "", 10, ""); err != nil {
+			t.Fatalf("update seed sync log: %v", err)
+		}
+	}
+	seedCompleted(2, 1)
+	seedCompleted(2, 1)
+
+	if _, err := s.CreateNote("orion release checklist", nil, []string{"orion"}, "manual"); err != nil {
+		t.Fatalf("create context note: %v", err)
+	}
+	matchedTask, _ := s.CreateTask("Prepare Orion rollout", "", nil, 1)
+	otherTask, _ := s.CreateTask("Refactor payroll parser", "", nil, 1)
+
+	syncResult := SyncResult{
+		Summary:        "Prediction run with context",
+		NotesAdded:     3,
+		TasksAdded:     5,
+		KBFilesUpdated: []string{"ops/context.md"},
+	}
+	envelope := claudeJSONResponse{Type: "result", StructuredOutput: &syncResult}
+	envelopeJSON, _ := json.Marshal(envelope)
+
+	svc := NewService(s, &mockExecutor{output: envelopeJSON}, "")
+	result, err := svc.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync run: %v", err)
+	}
+	if result.PriorityDelta != 2 {
+		t.Fatalf("expected priority delta +2, got %d", result.PriorityDelta)
+	}
+	if result.AdjustedTasks != 1 {
+		t.Fatalf("expected only 1 adjusted task, got %d", result.AdjustedTasks)
+	}
+
+	afterMatched, _ := s.GetTask(matchedTask.ID)
+	afterOther, _ := s.GetTask(otherTask.ID)
+	if afterMatched.Priority != 3 {
+		t.Fatalf("expected matched task priority 3, got %d", afterMatched.Priority)
+	}
+	if afterOther.Priority != 1 {
+		t.Fatalf("expected unmatched task priority to remain 1, got %d", afterOther.Priority)
+	}
+}
+
 func TestPriorityDeltaFromError(t *testing.T) {
 	cases := []struct {
 		err  float64

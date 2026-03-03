@@ -450,7 +450,7 @@ func TestAdjustTodoTaskPriorities(t *testing.T) {
 		t.Fatalf("mark done task: %v", err)
 	}
 
-	adjusted, err := s.AdjustTodoTaskPriorities(1, 2)
+	adjusted, err := s.AdjustTodoTaskPriorities(1, 2, nil)
 	if err != nil {
 		t.Fatalf("adjust todo priorities: %v", err)
 	}
@@ -474,6 +474,30 @@ func TestAdjustTodoTaskPriorities(t *testing.T) {
 	}
 	if afterDone.Priority != 3 {
 		t.Fatalf("expected done task to remain 3, got %d", afterDone.Priority)
+	}
+}
+
+func TestAdjustTodoTaskPriorities_ContextFiltered(t *testing.T) {
+	s := setupTestStore(t)
+
+	matchTask, _ := s.CreateTask("Prepare Orion rollout", "Coordinate release runbook", nil, 2)
+	otherTask, _ := s.CreateTask("Refactor payroll parser", "cleanup internals", nil, 2)
+
+	adjusted, err := s.AdjustTodoTaskPriorities(1, 5, []string{"orion"})
+	if err != nil {
+		t.Fatalf("adjust todo priorities with context: %v", err)
+	}
+	if adjusted != 1 {
+		t.Fatalf("expected 1 adjusted task, got %d", adjusted)
+	}
+
+	afterMatch, _ := s.GetTask(matchTask.ID)
+	afterOther, _ := s.GetTask(otherTask.ID)
+	if afterMatch.Priority != 3 {
+		t.Fatalf("expected matched task priority 3, got %d", afterMatch.Priority)
+	}
+	if afterOther.Priority != 2 {
+		t.Fatalf("expected unmatched task to remain 2, got %d", afterOther.Priority)
 	}
 }
 
