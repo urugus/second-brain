@@ -201,6 +201,7 @@ func (s *Store) ApplySleepReplayConsolidation(replayWeightByNoteID map[int64]flo
 }
 
 func (s *Store) RecallNote(id int64, now time.Time, context string) error {
+	runtimeCfg := config.LoadRuntime()
 	now = now.UTC()
 	nowStr := now.Format(time.RFC3339)
 
@@ -234,8 +235,102 @@ func (s *Store) RecallNote(id int64, now time.Time, context string) error {
 	if err != nil {
 		return fmt.Errorf("update note recall state: %w", err)
 	}
+	if err := s.applyRecallEdgeFeedback(tx, id, context, nowStr, runtimeCfg); err != nil {
+		return fmt.Errorf("apply recall edge feedback: %w", err)
+	}
 
 	return tx.Commit()
+}
+
+func (s *Store) applyRecallEdgeFeedback(tx *sql.Tx, noteID int64, context string, nowStr string, cfg config.Runtime) error {
+	if !cfg.MemoryEdgeFeedbackEnabled || cfg.MemoryEdgeFeedbackMaxEdges <= 0 {
+		return nil
+	}
+	terms := tokenizeContextTerms(context)
+	if len(terms) == 0 {
+		return nil
+	}
+
+	rows, err := tx.Query(
+		`SELECT me.to_note_id, me.weight, n.content, n.tags
+		 FROM memory_edges me
+		 JOIN notes n ON n.id = me.to_note_id
+		 WHERE me.from_note_id = ?
+		 ORDER BY me.weight DESC
+		 LIMIT ?`,
+		noteID,
+		cfg.MemoryEdgeFeedbackMaxEdges,
+	)
+	if err != nil {
+		return fmt.Errorf("query edge feedback candidates: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			toNoteID int64
+			weight   float64
+			content  string
+			tags     string
+		)
+		if err := rows.Scan(&toNoteID, &weight, &content, &tags); err != nil {
+			return fmt.Errorf("scan edge feedback candidate: %w", err)
+		}
+
+		matchRatio := recallContextMatchRatio(terms, content, tags)
+		if matchRatio > 0 && cfg.MemoryEdgeFeedbackAlpha > 0 {
+			delta := cfg.MemoryEdgeFeedbackAlpha * matchRatio * (1 - weight)
+			newWeight := clamp(weight+delta, minEdgeWeightEpsilon, 1)
+			_, err := tx.Exec(
+				`UPDATE memory_edges
+				 SET weight = ?, evidence = ?, reinforced_count = reinforced_count + 1, updated_at = ?
+				 WHERE from_note_id = ? AND to_note_id = ?`,
+				newWeight,
+				fmt.Sprintf("feedback:recall-match ratio=%.2f", matchRatio),
+				nowStr,
+				noteID,
+				toNoteID,
+			)
+			if err != nil {
+				return fmt.Errorf("update reinforced feedback edge: %w", err)
+			}
+			continue
+		}
+
+		if matchRatio == 0 && cfg.MemoryEdgeFeedbackDecay > 0 {
+			floor := cfg.MemoryEdgeMinWeight
+			if floor <= 0 {
+				floor = minEdgeWeightEpsilon
+			}
+			if floor > weight {
+				floor = weight
+			}
+			newWeight := weight * (1 - cfg.MemoryEdgeFeedbackDecay)
+			if newWeight < floor {
+				newWeight = floor
+			}
+			if math.Abs(newWeight-weight) < 1e-9 {
+				continue
+			}
+			_, err := tx.Exec(
+				`UPDATE memory_edges
+				 SET weight = ?, evidence = ?, updated_at = ?
+				 WHERE from_note_id = ? AND to_note_id = ?`,
+				newWeight,
+				"feedback:recall-miss",
+				nowStr,
+				noteID,
+				toNoteID,
+			)
+			if err != nil {
+				return fmt.Errorf("update decayed feedback edge: %w", err)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate edge feedback candidates: %w", err)
+	}
+	return nil
 }
 
 func recallContextBoost(context, content, tags string) float64 {
@@ -262,6 +357,27 @@ func recallContextBoost(context, content, tags string) float64 {
 	// Context match increases reinforcement up to +35%.
 	ratio := float64(matched) / float64(len(terms))
 	return 1.0 + (0.35 * ratio)
+}
+
+func recallContextMatchRatio(terms []string, content, tags string) float64 {
+	if len(terms) == 0 {
+		return 0
+	}
+	noteText := normalizeContextText(content + " " + strings.ReplaceAll(tags, ",", " "))
+	if noteText == "" {
+		return 0
+	}
+
+	matched := 0
+	for _, term := range terms {
+		if strings.Contains(noteText, term) {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return 0
+	}
+	return float64(matched) / float64(len(terms))
 }
 
 func tokenizeContextTerms(text string) []string {

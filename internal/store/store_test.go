@@ -21,11 +21,15 @@ func setupTestStore(t *testing.T) *Store {
 	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MIN_SCORE", "0.34")
 	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_CANDIDATES", "80")
 	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "3")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_ALPHA", "0.12")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "0.05")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "10")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "5")
 	t.Setenv("SB_SYNC_PREDICTION_WINDOW", "5")
 	t.Setenv("SB_PRIORITY_ADJUST_LIMIT", "5")
 	t.Setenv("SB_SLEEP_THRESHOLD", "10")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "0")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "1")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "14")
 
 	dir := t.TempDir()
@@ -286,6 +290,88 @@ func TestRecallNote_ContextMatchBoostsStrength(t *testing.T) {
 			deltaMatched,
 			deltaUnmatched,
 		)
+	}
+}
+
+func TestRecallNote_FeedbackLearningAdjustsEdgeWeights(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_ALPHA", "0.20")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "0.10")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "10")
+
+	seed, _ := s.CreateNote("kafka retry strategy", nil, []string{"kafka"}, "manual")
+	match, _ := s.CreateNote("kafka backoff tuning", nil, []string{"kafka", "retry"}, "manual")
+	miss, _ := s.CreateNote("design token palette", nil, []string{"design"}, "manual")
+
+	if err := s.LinkNotes(seed.ID, match.ID, 0.50, "seed->match"); err != nil {
+		t.Fatalf("link seed->match: %v", err)
+	}
+	if err := s.LinkNotes(seed.ID, miss.ID, 0.50, "seed->miss"); err != nil {
+		t.Fatalf("link seed->miss: %v", err)
+	}
+
+	if err := s.RecallNote(seed.ID, time.Now().UTC(), "kafka backoff"); err != nil {
+		t.Fatalf("recall seed note: %v", err)
+	}
+
+	var matchWeight float64
+	var matchReinforced int
+	if err := s.db.QueryRow(
+		`SELECT weight, reinforced_count FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		seed.ID, match.ID,
+	).Scan(&matchWeight, &matchReinforced); err != nil {
+		t.Fatalf("query seed->match edge: %v", err)
+	}
+	if matchWeight <= 0.50 {
+		t.Fatalf("expected matched edge reinforcement, got weight=%f", matchWeight)
+	}
+	if matchReinforced != 2 {
+		t.Fatalf("expected matched edge reinforced_count=2, got %d", matchReinforced)
+	}
+
+	var missWeight float64
+	var missReinforced int
+	if err := s.db.QueryRow(
+		`SELECT weight, reinforced_count FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		seed.ID, miss.ID,
+	).Scan(&missWeight, &missReinforced); err != nil {
+		t.Fatalf("query seed->miss edge: %v", err)
+	}
+	if missWeight >= 0.50 {
+		t.Fatalf("expected missed edge decay, got weight=%f", missWeight)
+	}
+	if missReinforced != 1 {
+		t.Fatalf("expected missed edge reinforced_count to remain 1, got %d", missReinforced)
+	}
+}
+
+func TestRecallNote_FeedbackLearningDisabled(t *testing.T) {
+	s := setupTestStore(t)
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "0")
+
+	seed, _ := s.CreateNote("incident playbook", nil, []string{"ops"}, "manual")
+	related, _ := s.CreateNote("incident rollback sequence", nil, []string{"ops"}, "manual")
+	if err := s.LinkNotes(seed.ID, related.ID, 0.60, "seed->related"); err != nil {
+		t.Fatalf("link seed->related: %v", err)
+	}
+
+	if err := s.RecallNote(seed.ID, time.Now().UTC(), "incident rollback"); err != nil {
+		t.Fatalf("recall seed note: %v", err)
+	}
+
+	var weight float64
+	var reinforced int
+	if err := s.db.QueryRow(
+		`SELECT weight, reinforced_count FROM memory_edges WHERE from_note_id = ? AND to_note_id = ?`,
+		seed.ID, related.ID,
+	).Scan(&weight, &reinforced); err != nil {
+		t.Fatalf("query edge: %v", err)
+	}
+	if !almostEqual(weight, 0.60) {
+		t.Fatalf("expected unchanged edge weight when feedback disabled, got %f", weight)
+	}
+	if reinforced != 1 {
+		t.Fatalf("expected unchanged reinforced_count when feedback disabled, got %d", reinforced)
 	}
 }
 

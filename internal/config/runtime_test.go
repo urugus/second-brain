@@ -20,6 +20,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "")
 	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "")
 	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_ALPHA", "")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "")
@@ -31,6 +34,7 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "")
 
 	cfg := LoadRuntime()
@@ -85,6 +89,15 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if cfg.MemoryEdgeMinWeight != 0.02 {
 		t.Fatalf("unexpected default memory edge min weight: %f", cfg.MemoryEdgeMinWeight)
 	}
+	if cfg.MemoryEdgeFeedbackAlpha != 0.12 {
+		t.Fatalf("unexpected default memory edge feedback alpha: %f", cfg.MemoryEdgeFeedbackAlpha)
+	}
+	if cfg.MemoryEdgeFeedbackDecay != 0.05 {
+		t.Fatalf("unexpected default memory edge feedback decay: %f", cfg.MemoryEdgeFeedbackDecay)
+	}
+	if cfg.MemoryEdgeFeedbackMaxEdges != 10 {
+		t.Fatalf("unexpected default memory edge feedback max edges: %d", cfg.MemoryEdgeFeedbackMaxEdges)
+	}
 	if cfg.TaskPriorityMax != 5 {
 		t.Fatalf("unexpected default task priority max: %d", cfg.TaskPriorityMax)
 	}
@@ -118,6 +131,9 @@ func TestLoadRuntimeDefaults(t *testing.T) {
 	if !cfg.MemoryEdgeDecayEnabled {
 		t.Fatal("memory edge decay should default to enabled")
 	}
+	if !cfg.MemoryEdgeFeedbackEnabled {
+		t.Fatal("memory edge feedback should default to enabled")
+	}
 	if cfg.MetricsWindowDays != 14 {
 		t.Fatalf("unexpected default metrics window: %d", cfg.MetricsWindowDays)
 	}
@@ -141,6 +157,9 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_MEMORY_EDGE_CREATE_AUTOLINK_MAX_LINKS", "5")
 	t.Setenv("SB_MEMORY_EDGE_DECAY_RATE", "0.03")
 	t.Setenv("SB_MEMORY_EDGE_MIN_WEIGHT", "0.05")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_ALPHA", "0.22")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_DECAY", "0.11")
+	t.Setenv("SB_MEMORY_EDGE_FEEDBACK_MAX_EDGES", "7")
 	t.Setenv("SB_TASK_PRIORITY_MAX", "9")
 	t.Setenv("SB_SYNC_FOCUS_NOTES_LIMIT", "180")
 	t.Setenv("SB_SYNC_FOCUS_TASKS_LIMIT", "90")
@@ -152,6 +171,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_AUTOLINK", "false")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_CREATE_AUTOLINK", "1")
 	t.Setenv("SB_FEATURE_MEMORY_EDGE_DECAY", "0")
+	t.Setenv("SB_FEATURE_MEMORY_EDGE_FEEDBACK", "false")
 	t.Setenv("SB_METRICS_WINDOW_DAYS", "30")
 
 	cfg := LoadRuntime()
@@ -172,6 +192,9 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.MemoryEdgeCreateMaxLinks != 5 ||
 		cfg.MemoryEdgeDecayRate != 0.03 ||
 		cfg.MemoryEdgeMinWeight != 0.05 ||
+		cfg.MemoryEdgeFeedbackAlpha != 0.22 ||
+		cfg.MemoryEdgeFeedbackDecay != 0.11 ||
+		cfg.MemoryEdgeFeedbackMaxEdges != 7 ||
 		cfg.TaskPriorityMax != 9 ||
 		cfg.SyncFocusNotesLimit != 180 ||
 		cfg.SyncFocusTasksLimit != 90 ||
@@ -183,6 +206,7 @@ func TestLoadRuntimeOverridesAndBounds(t *testing.T) {
 		cfg.MemoryEdgeAutoLinkEnabled ||
 		!cfg.MemoryEdgeCreateEnabled ||
 		cfg.MemoryEdgeDecayEnabled ||
+		cfg.MemoryEdgeFeedbackEnabled ||
 		cfg.MetricsWindowDays != 30 {
 		t.Fatalf("unexpected overridden config: %+v", cfg)
 	}
