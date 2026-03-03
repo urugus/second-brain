@@ -407,6 +407,25 @@ func upsertEntityFromCandidate(tx *sql.Tx, candidate entityCandidate, source str
 		return 0, fmt.Errorf("upsert note entity relation: %w", err)
 	}
 
+	var supportingNotes int
+	if err := tx.QueryRow(
+		`SELECT COUNT(DISTINCT note_id) FROM note_entities WHERE entity_id = ?`,
+		entityID,
+	).Scan(&supportingNotes); err != nil {
+		return 0, fmt.Errorf("count supporting notes for entity %d: %w", entityID, err)
+	}
+	if supportingNotes >= 2 {
+		if _, err := tx.Exec(
+			`UPDATE entities
+			 SET status = 'confirmed', updated_at = ?
+			 WHERE id = ? AND status = 'candidate'`,
+			nowStr,
+			entityID,
+		); err != nil {
+			return 0, fmt.Errorf("promote entity status: %w", err)
+		}
+	}
+
 	return entityID, nil
 }
 

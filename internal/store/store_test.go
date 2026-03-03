@@ -1013,6 +1013,61 @@ func TestLearnEntitiesFromNoteRespectsFeatureFlag(t *testing.T) {
 	}
 }
 
+func TestLearnEntitiesFromNotePromotesEntityAfterRepeatedEvidence(t *testing.T) {
+	s := setupTestStore(t)
+
+	first, err := s.CreateNote("Grace Hopper early memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create first note: %v", err)
+	}
+	second, err := s.CreateNote("Grace Hopper compiler note", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create second note: %v", err)
+	}
+
+	if err := s.LearnEntitiesFromNote(*first, "consolidation_apply"); err != nil {
+		t.Fatalf("learn first note entities: %v", err)
+	}
+	firstEntities, err := s.ListEntitiesByNote(first.ID)
+	if err != nil {
+		t.Fatalf("list first entities: %v", err)
+	}
+	firstPerson, ok := findEntityByKindAndName(firstEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity in first note, got %+v", firstEntities)
+	}
+	if firstPerson.Status != "candidate" {
+		t.Fatalf("expected candidate after single supporting note, got %s", firstPerson.Status)
+	}
+
+	if err := s.LearnEntitiesFromNote(*second, "consolidation_apply"); err != nil {
+		t.Fatalf("learn second note entities: %v", err)
+	}
+	secondEntities, err := s.ListEntitiesByNote(second.ID)
+	if err != nil {
+		t.Fatalf("list second entities: %v", err)
+	}
+	secondPerson, ok := findEntityByKindAndName(secondEntities, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity in second note, got %+v", secondEntities)
+	}
+	if secondPerson.Status != "confirmed" {
+		t.Fatalf("expected confirmed after repeated supporting notes, got %s", secondPerson.Status)
+	}
+
+	firstEntitiesAgain, err := s.ListEntitiesByNote(first.ID)
+	if err != nil {
+		t.Fatalf("list first entities again: %v", err)
+	}
+	firstPersonAgain, ok := findEntityByKindAndName(firstEntitiesAgain, "person", "grace hopper")
+	if !ok {
+		t.Fatalf("expected person entity in first note after promotion, got %+v", firstEntitiesAgain)
+	}
+	if firstPersonAgain.Status != "confirmed" {
+		t.Fatalf("expected shared entity status to propagate as confirmed, got %s", firstPersonAgain.Status)
+	}
+}
+
 func TestLearnEntitiesFromNoteCreatesEntityDerivedMemoryEdges(t *testing.T) {
 	s := setupTestStore(t)
 
