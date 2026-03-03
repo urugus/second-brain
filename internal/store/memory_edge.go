@@ -11,6 +11,8 @@ import (
 	"github.com/urugus/second-brain/internal/model"
 )
 
+const minEdgeWeightEpsilon = 1e-6
+
 func (s *Store) LinkNotes(fromNoteID, toNoteID int64, weight float64, evidence string) error {
 	if fromNoteID == toNoteID {
 		return fmt.Errorf("from_note_id and to_note_id must be different")
@@ -190,6 +192,9 @@ func (s *Store) DecayMemoryEdges(now time.Time) (int, error) {
 
 		newWeight := weight * math.Exp(-cfg.MemoryEdgeDecayRate*dtDays)
 		floor := cfg.MemoryEdgeMinWeight
+		if floor <= 0 {
+			floor = minEdgeWeightEpsilon
+		}
 		if floor > weight {
 			floor = weight
 		}
