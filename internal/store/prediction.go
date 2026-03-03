@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/urugus/second-brain/internal/config"
@@ -77,11 +78,12 @@ func (s *Store) ListPredictionErrors(limit int) ([]model.PredictionErrorLog, err
 	return logs, rows.Err()
 }
 
-func (s *Store) AdjustTodoTaskPriorities(delta int, limit int) (int, error) {
+func (s *Store) AdjustTodoTaskPriorities(delta int, limit int, contextTerms []string) (int, error) {
 	if delta == 0 || limit <= 0 {
 		return 0, nil
 	}
 	maxTaskPriority := config.LoadRuntime().TaskPriorityMax
+	normalizedContextTerms := normalizePriorityContextTerms(contextTerms)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -90,12 +92,11 @@ func (s *Store) AdjustTodoTaskPriorities(delta int, limit int) (int, error) {
 	defer tx.Rollback()
 
 	rows, err := tx.Query(
-		`SELECT id, priority
+		`SELECT id, priority, title, description
 		 FROM tasks
 		 WHERE status = ?
-		 ORDER BY priority DESC, id ASC
-		 LIMIT ?`,
-		string(model.TaskTodo), limit,
+		 ORDER BY priority DESC, id ASC`,
+		string(model.TaskTodo),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("query todo tasks for priority adjustment: %w", err)
@@ -105,11 +106,13 @@ func (s *Store) AdjustTodoTaskPriorities(delta int, limit int) (int, error) {
 	type taskPriority struct {
 		id       int64
 		priority int
+		title    string
+		desc     string
 	}
 	var tasks []taskPriority
 	for rows.Next() {
 		var t taskPriority
-		if err := rows.Scan(&t.id, &t.priority); err != nil {
+		if err := rows.Scan(&t.id, &t.priority, &t.title, &t.desc); err != nil {
 			return 0, fmt.Errorf("scan task for priority adjustment: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -121,6 +124,9 @@ func (s *Store) AdjustTodoTaskPriorities(delta int, limit int) (int, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	adjusted := 0
 	for _, t := range tasks {
+		if len(normalizedContextTerms) > 0 && !taskMatchesPriorityContext(t.title, t.desc, normalizedContextTerms) {
+			continue
+		}
 		next := clampInt(t.priority+delta, 0, maxTaskPriority)
 		if next == t.priority {
 			continue
@@ -132,12 +138,51 @@ func (s *Store) AdjustTodoTaskPriorities(delta int, limit int) (int, error) {
 			return 0, fmt.Errorf("update task priority %d: %w", t.id, err)
 		}
 		adjusted++
+		if adjusted >= limit {
+			break
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit priority adjustment: %w", err)
 	}
 	return adjusted, nil
+}
+
+func normalizePriorityContextTerms(terms []string) []string {
+	if len(terms) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(terms))
+	normalized := make([]string, 0, len(terms))
+	for _, term := range terms {
+		key := strings.ToLower(strings.TrimSpace(term))
+		if key == "" {
+			continue
+		}
+		if len(key) < 2 {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, key)
+	}
+	return normalized
+}
+
+func taskMatchesPriorityContext(title, desc string, terms []string) bool {
+	if len(terms) == 0 {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(title + " " + desc))
+	for _, term := range terms {
+		if strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func scanPredictionErrorLog(row *sql.Row) (*model.PredictionErrorLog, error) {

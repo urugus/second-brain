@@ -59,7 +59,8 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decay memories: %w", err)
 	}
-	prompt := buildSyncPrompt(s.buildSyncFocusProfile(runtimeCfg))
+	profile := s.buildSyncFocusProfile(runtimeCfg)
+	prompt := buildSyncPrompt(profile)
 	predictedNotes, predictedTasks := s.estimateExpectedSyncOutcome(runtimeCfg.SyncPredictionWindow)
 
 	// Create log entry
@@ -108,7 +109,7 @@ func (s *Service) Run(ctx context.Context) (*SyncResult, error) {
 	result.TasksError = float64(result.TasksAdded) - predictedTasks
 	if runtimeCfg.PredictionLearningEnabled {
 		result.PriorityDelta = priorityDeltaFromError(result.TasksError)
-		result.AdjustedTasks = s.applyPriorityLearning(result.PriorityDelta, runtimeCfg.PriorityAdjustLimit)
+		result.AdjustedTasks = s.applyPriorityLearning(result.PriorityDelta, runtimeCfg.PriorityAdjustLimit, profile)
 		s.recordPredictionErrors(result)
 	}
 
@@ -160,12 +161,26 @@ func (s *Service) estimateExpectedSyncOutcome(window int) (float64, float64) {
 	return predictedNotes, predictedTasks
 }
 
-func (s *Service) applyPriorityLearning(priorityDelta int, limit int) int {
-	adjusted, err := s.store.AdjustTodoTaskPriorities(priorityDelta, limit)
+func (s *Service) applyPriorityLearning(priorityDelta int, limit int, profile *focusProfile) int {
+	adjusted, err := s.store.AdjustTodoTaskPriorities(
+		priorityDelta,
+		limit,
+		priorityLearningContextTerms(profile),
+	)
 	if err != nil {
 		return 0
 	}
 	return adjusted
+}
+
+func priorityLearningContextTerms(profile *focusProfile) []string {
+	if profile == nil {
+		return nil
+	}
+	terms := make([]string, 0, len(profile.Terms)+len(profile.Tags))
+	terms = append(terms, profile.Terms...)
+	terms = append(terms, profile.Tags...)
+	return terms
 }
 
 func (s *Service) recordPredictionErrors(result *SyncResult) {
