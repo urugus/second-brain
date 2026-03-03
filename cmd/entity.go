@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -130,12 +132,37 @@ var entityShowCmd = &cobra.Command{
 	},
 }
 
+var entitySetStatusCmd = &cobra.Command{
+	Use:   "set-status <id> <status>",
+	Short: "Update status of a learned entity",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid entity ID: %s", args[0])
+		}
+		status := strings.TrimSpace(args[1])
+		if status == "" {
+			return fmt.Errorf("status must not be empty")
+		}
+
+		if err := appStore.UpdateEntityStatus(id, status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("entity %d not found", id)
+			}
+			return err
+		}
+		fmt.Printf("Entity #%d status updated to %s.\n", id, strings.ToLower(status))
+		return nil
+	},
+}
+
 func init() {
 	entityListCmd.Flags().Int64("note", 0, "Filter entities by note ID")
 	entityListCmd.Flags().String("kind", "", "Filter by entity kind (person|concept|org|project)")
 	entityListCmd.Flags().String("status", "", "Filter by entity status (candidate|confirmed|rejected|archived)")
 	entityListCmd.Flags().Int("limit", 20, "Maximum number of entities")
 
-	entityCmd.AddCommand(entityListCmd, entityShowCmd)
+	entityCmd.AddCommand(entityListCmd, entityShowCmd, entitySetStatusCmd)
 	rootCmd.AddCommand(entityCmd)
 }

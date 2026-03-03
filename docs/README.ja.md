@@ -182,6 +182,7 @@ sb consolidate
 |---------|------|-------|
 | `entity list` | 学習済み entity を一覧表示 | `--note`, `--kind`, `--status`, `--limit` |
 | `entity show <id>` | entity の詳細を表示 | |
+| `entity set-status <id> <status>` | entity のステータスを更新 | |
 
 ### kb
 

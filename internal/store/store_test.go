@@ -1134,6 +1134,48 @@ func TestListEntitiesSupportsKindAndStatusFilters(t *testing.T) {
 	}
 }
 
+func TestUpdateEntityStatus(t *testing.T) {
+	s := setupTestStore(t)
+
+	note, err := s.CreateNote("Grace Hopper compiler memo", nil, []string{"person:Grace Hopper"}, "manual")
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := s.LearnEntitiesFromNote(*note, "consolidation_apply"); err != nil {
+		t.Fatalf("learn entities: %v", err)
+	}
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities: %v", err)
+	}
+	if len(entities) == 0 {
+		t.Fatal("expected learned entities")
+	}
+	entityID := entities[0].ID
+
+	if err := s.UpdateEntityStatus(entityID, "rejected"); err != nil {
+		t.Fatalf("update entity status: %v", err)
+	}
+	updated, err := s.GetEntity(entityID)
+	if err != nil {
+		t.Fatalf("get entity after update: %v", err)
+	}
+	if updated.Status != "rejected" {
+		t.Fatalf("expected entity status rejected, got %s", updated.Status)
+	}
+}
+
+func TestUpdateEntityStatusValidation(t *testing.T) {
+	s := setupTestStore(t)
+
+	if err := s.UpdateEntityStatus(1, "invalid-status"); err == nil {
+		t.Fatal("expected invalid status error")
+	}
+	if err := s.UpdateEntityStatus(9999, "confirmed"); err == nil {
+		t.Fatal("expected not found error")
+	}
+}
+
 func TestLearnEntitiesFromNoteCreatesEntityDerivedMemoryEdges(t *testing.T) {
 	s := setupTestStore(t)
 

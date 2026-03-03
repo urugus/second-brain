@@ -38,6 +38,16 @@ type EntityFilter struct {
 	Limit  int
 }
 
+func normalizeEntityStatus(status string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	switch normalized {
+	case "candidate", "confirmed", "rejected", "archived":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid entity status: %s", status)
+	}
+}
+
 func (s *Store) LearnEntitiesFromNote(note model.Note, source string) error {
 	cfg := config.LoadRuntime()
 	if !cfg.EntityLearningEnabled {
@@ -131,6 +141,32 @@ func (s *Store) GetEntity(id int64) (*model.Entity, error) {
 	entity.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	entity.UpdatedAt, _ = time.Parse(time.RFC3339, upAt)
 	return &entity, nil
+}
+
+func (s *Store) UpdateEntityStatus(id int64, status string) error {
+	normalizedStatus, err := normalizeEntityStatus(status)
+	if err != nil {
+		return err
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.Exec(
+		`UPDATE entities SET status = ?, updated_at = ? WHERE id = ?`,
+		normalizedStatus,
+		nowStr,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("update entity status: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read updated rows for entity status: %w", err)
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) ListEntities(filter EntityFilter) ([]model.Entity, error) {
