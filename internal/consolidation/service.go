@@ -207,6 +207,7 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	var appliedFiles []string
 	var writeErrors []string
 	autoLinkedPairs := make(map[string]struct{})
+	entityLearnedNoteIDs := make(map[int64]struct{})
 	for _, u := range dedupedKBUpdates {
 		content := stripRelatedSection(u.Content)
 		if err := s.kb.Write(u.Path, content); err != nil {
@@ -221,6 +222,10 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
 			for _, note := range selectNotesByIDs(noteIDs, replayPlan.replayNotes) {
+				if _, seen := entityLearnedNoteIDs[note.ID]; seen {
+					continue
+				}
+				entityLearnedNoteIDs[note.ID] = struct{}{}
 				_ = s.store.LearnEntitiesFromNote(note, "sleep_consolidation")
 			}
 		}
@@ -608,6 +613,7 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 	sessionNotes, _ := s.store.ListNotes(store.NoteFilter{SessionID: &changes.SessionID})
 	runtimeCfg := config.LoadRuntime()
 	autoLinkedPairs := make(map[string]struct{})
+	entityLearnedNoteIDs := make(map[int64]struct{})
 
 	// Write approved KB files
 	for _, idx := range approvedKBIndices {
@@ -627,6 +633,10 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
 			for _, note := range selectNotesByIDs(noteIDs, sessionNotes) {
+				if _, seen := entityLearnedNoteIDs[note.ID]; seen {
+					continue
+				}
+				entityLearnedNoteIDs[note.ID] = struct{}{}
 				_ = s.store.LearnEntitiesFromNote(note, "consolidation_apply")
 			}
 		}

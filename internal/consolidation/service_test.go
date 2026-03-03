@@ -930,6 +930,61 @@ func TestApplyLearnsEntitiesFromMatchedNotes(t *testing.T) {
 	}
 }
 
+func TestApplyEntityLearningDeduplicatesNotesAcrossKBUpdates(t *testing.T) {
+	s, k := setupTest(t)
+
+	sess, _ := s.CreateSession("Entity Dedup Apply", "")
+	note, _ := s.CreateNote(
+		"Grace Hopper compiler memo",
+		&sess.ID,
+		[]string{"person:Grace Hopper"},
+		"manual",
+	)
+	s.EndSession(sess.ID, "done")
+
+	agent := &mockAgent{
+		result: &adapter.ConsolidationResult{
+			Summary: "entity dedup apply test",
+			KBUpdates: []adapter.KBUpdate{
+				{
+					Path:    "people/grace-hopper-a.md",
+					Content: "# Grace Hopper A\ngrace hopper compiler memo\n",
+					Reason:  "person profile a",
+				},
+				{
+					Path:    "people/grace-hopper-b.md",
+					Content: "# Grace Hopper B\ngrace hopper compiler memo\n",
+					Reason:  "person profile b",
+				},
+			},
+		},
+	}
+
+	svc := NewService(s, k, agent)
+	proposed, err := svc.Propose(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if err := svc.Apply(context.Background(), proposed, []int{0, 1}, nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	entities, err := s.ListEntitiesByNote(note.ID)
+	if err != nil {
+		t.Fatalf("list entities by note: %v", err)
+	}
+	if len(entities) != 1 {
+		t.Fatalf("expected exactly one learned entity, got %+v", entities)
+	}
+	if entities[0].Kind != "person" {
+		t.Fatalf("expected person entity, got %+v", entities[0])
+	}
+	// One-pass learning should keep initial strength (~0.43) without duplicate reinforcement.
+	if entities[0].Strength >= 0.55 {
+		t.Fatalf("expected deduped entity learning strength below 0.55, got %f", entities[0].Strength)
+	}
+}
+
 func TestApplyStripsOldRelatedSection(t *testing.T) {
 	s, k := setupTest(t)
 
