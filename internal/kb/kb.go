@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/urugus/second-brain/internal/model"
 )
 
 type KB struct {
@@ -46,6 +48,7 @@ func (k *KB) List() ([]string, error) {
 	return files, nil
 }
 
+// Read returns the full file content including any front matter.
 func (k *KB) Read(relPath string) (string, error) {
 	absPath, err := k.checkPath(relPath)
 	if err != nil {
@@ -57,6 +60,15 @@ func (k *KB) Read(relPath string) (string, error) {
 		return "", fmt.Errorf("read file: %w", err)
 	}
 	return string(data), nil
+}
+
+// ReadBody returns only the markdown body, stripping any YAML front matter.
+func (k *KB) ReadBody(relPath string) (string, error) {
+	content, err := k.Read(relPath)
+	if err != nil {
+		return "", err
+	}
+	return StripFrontMatter(content), nil
 }
 
 func (k *KB) checkPath(relPath string) (string, error) {
@@ -103,7 +115,10 @@ func (k *KB) ExtractTitle(relPath string) (string, error) {
 		return "", err
 	}
 
-	for _, line := range strings.Split(content, "\n") {
+	// Strip front matter so we don't accidentally pick up a YAML key as a title.
+	body := StripFrontMatter(content)
+
+	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "# ") {
 			return strings.TrimSpace(strings.TrimPrefix(trimmed, "# ")), nil
@@ -114,6 +129,23 @@ func (k *KB) ExtractTitle(relPath string) (string, error) {
 	base := filepath.Base(relPath)
 	ext := filepath.Ext(base)
 	return strings.TrimSuffix(base, ext), nil
+}
+
+// ReadMetadata parses YAML front matter from a KB file and returns the
+// metadata. Returns a zero KBMetadata if no front matter is present.
+func (k *KB) ReadMetadata(relPath string) (model.KBMetadata, error) {
+	content, err := k.Read(relPath)
+	if err != nil {
+		return model.KBMetadata{}, err
+	}
+	meta, _ := ParseFrontMatter(content)
+	return meta, nil
+}
+
+// WriteWithMetadata writes a KB file with YAML front matter metadata prepended.
+func (k *KB) WriteWithMetadata(relPath string, body string, meta model.KBMetadata) error {
+	content := MarshalFrontMatter(meta, body)
+	return k.Write(relPath, content)
 }
 
 func (k *KB) Search(query string) ([]SearchResult, error) {
