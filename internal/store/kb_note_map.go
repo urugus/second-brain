@@ -27,6 +27,36 @@ func (s *Store) MapKBNotes(kbPath string, noteIDs []int64) error {
 	return nil
 }
 
+// NotesByKBPath returns all notes mapped to a given KB file path.
+func (s *Store) NotesByKBPath(kbPath string) ([]model.Note, error) {
+	rows, err := s.db.Query(
+		`SELECT n.id, n.session_id, n.content, n.tags, n.source,
+		        n.strength, n.decay_rate, n.salience, n.recall_count,
+		        n.last_recalled_at, n.created_at, n.updated_at, n.consolidated_at
+		 FROM notes n
+		 JOIN kb_note_map knm ON knm.note_id = n.id
+		 WHERE knm.kb_path = ?
+		 ORDER BY n.id`, kbPath,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query notes by kb path: %w", err)
+	}
+	defer rows.Close()
+
+	var notes []model.Note
+	for rows.Next() {
+		n, err := scanNoteFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, *n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate notes by kb path: %w", err)
+	}
+	return notes, nil
+}
+
 func (s *Store) RelatedKBFiles(kbPath string, limit int) ([]model.RelatedKBFile, error) {
 	if limit <= 0 {
 		limit = 5

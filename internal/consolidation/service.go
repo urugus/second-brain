@@ -208,6 +208,8 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 	var writeErrors []string
 	autoLinkedPairs := make(map[string]struct{})
 	entityLearnedNoteIDs := make(map[int64]struct{})
+	// Track which notes belong to each KB file for metadata generation.
+	kbNoteMap := make(map[string][]model.Note)
 	for _, u := range dedupedKBUpdates {
 		content := stripRelatedSection(u.Content)
 		if err := s.kb.Write(u.Path, content); err != nil {
@@ -221,7 +223,9 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
-			for _, note := range selectNotesByIDs(noteIDs, replayPlan.replayNotes) {
+			matched := selectNotesByIDs(noteIDs, replayPlan.replayNotes)
+			kbNoteMap[u.Path] = matched
+			for _, note := range matched {
 				if _, seen := entityLearnedNoteIDs[note.ID]; seen {
 					continue
 				}
@@ -231,17 +235,26 @@ func (s *Service) SleepConsolidate(ctx context.Context, threshold int) (*SleepRe
 		}
 	}
 
-	// Append Related sections (after all mappings are recorded)
+	// Rewrite KB files with front matter metadata and Related sections.
 	for _, path := range appliedFiles {
-		section := buildRelatedSection(path, s.store, s.kb)
-		if section == "" {
-			continue
-		}
-		existing, err := s.kb.Read(path)
+		body, err := s.kb.Read(path)
 		if err != nil {
 			continue
 		}
-		_ = s.kb.Write(path, existing+section)
+		// Strip any existing front matter (agent may have produced plain content).
+		body = kb.StripFrontMatter(body)
+
+		// Build related entries from store.
+		relatedFiles, _ := s.store.RelatedKBFiles(path, 5)
+		meta := kb.BuildMetadataForKBWrite(kbNoteMap[path], relatedFiles)
+
+		// Append Related section to the body.
+		section := buildRelatedSection(path, s.store, s.kb)
+		if section != "" {
+			body = body + section
+		}
+
+		_ = s.kb.WriteWithMetadata(path, body, meta)
 	}
 
 	if len(writeErrors) > 0 {
@@ -614,6 +627,7 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 	runtimeCfg := config.LoadRuntime()
 	autoLinkedPairs := make(map[string]struct{})
 	entityLearnedNoteIDs := make(map[int64]struct{})
+	kbNoteMap := make(map[string][]model.Note)
 
 	// Write approved KB files
 	for _, idx := range approvedKBIndices {
@@ -632,7 +646,9 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 		if len(noteIDs) > 0 {
 			_ = s.store.MapKBNotes(u.Path, noteIDs)
 			s.autoLinkNotesForKBUpdate(noteIDs, u.Path, runtimeCfg, autoLinkedPairs)
-			for _, note := range selectNotesByIDs(noteIDs, sessionNotes) {
+			matched := selectNotesByIDs(noteIDs, sessionNotes)
+			kbNoteMap[u.Path] = matched
+			for _, note := range matched {
 				if _, seen := entityLearnedNoteIDs[note.ID]; seen {
 					continue
 				}
@@ -642,17 +658,23 @@ func (s *Service) Apply(ctx context.Context, changes *ProposedChanges, approvedK
 		}
 	}
 
-	// Append Related sections (after all mappings are recorded)
+	// Rewrite KB files with front matter metadata and Related sections.
 	for _, path := range appliedFiles {
-		section := buildRelatedSection(path, s.store, s.kb)
-		if section == "" {
-			continue
-		}
-		existing, err := s.kb.Read(path)
+		body, err := s.kb.Read(path)
 		if err != nil {
 			continue
 		}
-		_ = s.kb.Write(path, existing+section)
+		body = kb.StripFrontMatter(body)
+
+		relatedFiles, _ := s.store.RelatedKBFiles(path, 5)
+		meta := kb.BuildMetadataForKBWrite(kbNoteMap[path], relatedFiles)
+
+		section := buildRelatedSection(path, s.store, s.kb)
+		if section != "" {
+			body = body + section
+		}
+
+		_ = s.kb.WriteWithMetadata(path, body, meta)
 	}
 
 	// Create approved tasks

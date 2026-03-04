@@ -113,7 +113,7 @@ func TestProposeAndApply(t *testing.T) {
 	}
 
 	// Verify KB file was written
-	content, err := k.Read("testing/approach.md")
+	content, err := k.ReadBody("testing/approach.md")
 	if err != nil {
 		t.Fatalf("read KB: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestSleepConsolidate_ReplayDedupAndStrengthUpdate(t *testing.T) {
 		seen[key] = struct{}{}
 	}
 
-	content, err := k.Read("golang/interfaces.md")
+	content, err := k.ReadBody("golang/interfaces.md")
 	if err != nil {
 		t.Fatalf("read deduped KB file: %v", err)
 	}
